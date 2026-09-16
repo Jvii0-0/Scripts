@@ -19,6 +19,7 @@ local function loadControlPanel()
 	end
 
 	if game.PlaceId ~= 124216119978534 then
+		print("Wrong game! This script only works in PlaceId 124216119978534")
 		return
 	end
 
@@ -30,7 +31,6 @@ local function loadControlPanel()
 
 	if oldGui then
 		oldGui:Destroy()
-		return
 	end
 
 	--------------------------------------------------
@@ -415,24 +415,23 @@ local function loadControlPanel()
 	local autoTake = false
 
 	local function isEgg(object)
+		-- FIX #2: Validate object still exists
+		if not object or not object.Parent then
+			return false
+		end
 
-		-- Option 1:
-		-- Explicit IsEgg attribute
-
+		-- Option 1: Explicit IsEgg attribute
 		if object:GetAttribute("IsEgg") == true then
 			return true
 		end
 
-		-- Option 2:
-		-- Name contains "Egg"
-
+		-- Option 2: Name contains "Egg"
 		if string.find(
 			string.lower(object.Name),
 			"egg",
 			1,
 			true
 		) then
-
 			return true
 		end
 
@@ -440,23 +439,26 @@ local function loadControlPanel()
 	end
 
 	local function findEggs()
-
 		table.clear(foundEggs)
 
-		for _, object in ipairs(workspace:GetDescendants()) do
-
-			if object:IsA("Model") and isEgg(object) then
-
-				table.insert(foundEggs, object)
-
+		-- FIX #3: Add pcall to prevent crash on large workspaces
+		local success, result = pcall(function()
+			for _, object in ipairs(workspace:GetDescendants()) do
+				if object:IsA("Model") and isEgg(object) then
+					table.insert(foundEggs, object)
+				end
 			end
+		end)
+
+		if not success then
+			print("Error finding eggs:", result)
+			return foundEggs
 		end
 
 		table.sort(foundEggs, function(a, b)
-
-			return string.lower(a.Name) <
-				string.lower(b.Name)
-
+			-- FIX #2: Handle destroyed objects
+			if not a.Parent or not b.Parent then return false end
+			return string.lower(a.Name) < string.lower(b.Name)
 		end)
 
 		return foundEggs
@@ -467,13 +469,10 @@ local function loadControlPanel()
 	--------------------------------------------------
 
 	local function clearEggList()
-
 		for _, child in ipairs(eggList:GetChildren()) do
-
 			if child:IsA("TextButton") then
 				child:Destroy()
 			end
-
 		end
 	end
 
@@ -482,7 +481,6 @@ local function loadControlPanel()
 	--------------------------------------------------
 
 	local function createEggButton(egg, order)
-
 		local button = Instance.new("TextButton")
 
 		button.Size = UDim2.new(1, 0, 0, 30)
@@ -498,18 +496,19 @@ local function loadControlPanel()
 		addCorner(button, 6)
 
 		local padding = Instance.new("UIPadding")
-
 		padding.PaddingLeft = UDim.new(0, 10)
 		padding.Parent = button
 
 		button.Activated:Connect(function()
-
-			currentEgg = egg
-
-			selectedEgg.Text = egg.Name
-
-			status.Text = "Status: Target selected - " .. egg.Name
-
+			-- FIX #2: Validate egg still exists
+			if egg and egg.Parent then
+				currentEgg = egg
+				selectedEgg.Text = egg.Name
+				status.Text = "Status: Target selected - " .. egg.Name
+			else
+				status.Text = "Status: Egg no longer exists"
+				currentEgg = nil
+			end
 		end)
 
 		return button
@@ -520,17 +519,16 @@ local function loadControlPanel()
 	--------------------------------------------------
 
 	local function refreshEggs()
-
 		clearEggList()
-
 		findEggs()
 
 		eggInfo.Text = "Eggs found: " .. tostring(#foundEggs)
 
 		for index, egg in ipairs(foundEggs) do
-
-			createEggButton(egg, index)
-
+			-- FIX #2: Only add if egg still exists
+			if egg and egg.Parent then
+				createEggButton(egg, index)
+			end
 		end
 
 		task.wait()
@@ -543,16 +541,38 @@ local function loadControlPanel()
 		)
 
 		if #foundEggs > 0 then
-
 			status.Text =
 				"Status: Found "
 				.. tostring(#foundEggs)
 				.. " eggs"
-
 		else
-
 			status.Text = "Status: No eggs found"
+		end
+	end
 
+	--------------------------------------------------
+	-- TAKE EGG FUNCTION
+	--------------------------------------------------
+
+	local function takeEgg(egg)
+		-- FIX #1: Implement actual egg taking logic
+		if not egg or not egg.Parent then
+			status.Text = "Status: Egg no longer exists"
+			return false
+		end
+
+		-- Try to move egg to player backpack/inventory
+		-- Adjust this based on actual game mechanics
+		local humanoidRootPart = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+		
+		if humanoidRootPart then
+			-- Option 1: Parent egg to player
+			egg.Parent = player.Backpack or player
+			status.Text = "Status: Took " .. egg.Name
+			return true
+		else
+			status.Text = "Status: Character not found"
+			return false
 		end
 	end
 
@@ -574,36 +594,28 @@ local function loadControlPanel()
 	addCorner(autoTakeButton, 7)
 
 	autoTakeButton.Activated:Connect(function()
-
 		autoTake = not autoTake
 
 		if autoTake then
-
 			autoTakeButton.Text = "Auto Take: ON"
 			autoTakeButton.BackgroundColor3 = colors.accent
 			autoTakeButton.TextColor3 = colors.text
 
 			if currentEgg and currentEgg.Parent then
-
-				status.Text =
-					"Status: Auto Take enabled for "
-					.. currentEgg.Name
-
+				-- FIX #1: Actually take the egg
+				takeEgg(currentEgg)
 			else
-
-				status.Text =
-					"Status: Select an egg first"
-
+				status.Text = "Status: Select an egg first"
+				autoTake = false
+				autoTakeButton.Text = "Auto Take: OFF"
+				autoTakeButton.BackgroundColor3 = colors.button
+				autoTakeButton.TextColor3 = colors.muted
 			end
-
 		else
-
 			autoTakeButton.Text = "Auto Take: OFF"
 			autoTakeButton.BackgroundColor3 = colors.button
 			autoTakeButton.TextColor3 = colors.muted
-
 			status.Text = "Status: Auto Take disabled"
-
 		end
 	end)
 
@@ -625,9 +637,7 @@ local function loadControlPanel()
 	addCorner(refreshButton, 7)
 
 	refreshButton.Activated:Connect(function()
-
 		refreshEggs()
-
 	end)
 
 	--------------------------------------------------
@@ -672,7 +682,6 @@ local function loadControlPanel()
 	local enabled = false
 
 	toggle.Activated:Connect(function()
-
 		enabled = not enabled
 
 		toggle.Text = enabled and "ON" or "OFF"
@@ -686,7 +695,6 @@ local function loadControlPanel()
 			enabled
 			and colors.text
 			or colors.muted
-
 	end)
 
 	--------------------------------------------------
@@ -694,9 +702,7 @@ local function loadControlPanel()
 	--------------------------------------------------
 
 	actionButton.Activated:Connect(function()
-
 		refreshEggs()
-
 	end)
 
 	--------------------------------------------------
@@ -706,7 +712,6 @@ local function loadControlPanel()
 	local minimized = false
 
 	local function setMinimized(value)
-
 		minimized = value
 
 		sidebar.Visible = not minimized
@@ -716,13 +721,10 @@ local function loadControlPanel()
 			minimized
 			and UDim2.fromOffset(650, 54)
 			or UDim2.fromOffset(650, 410)
-
 	end
 
 	minimizeButton.Activated:Connect(function()
-
 		setMinimized(not minimized)
-
 	end)
 
 	--------------------------------------------------
@@ -730,9 +732,7 @@ local function loadControlPanel()
 	--------------------------------------------------
 
 	closeButton.Activated:Connect(function()
-
 		gui:Destroy()
-
 	end)
 
 	--------------------------------------------------
@@ -740,7 +740,6 @@ local function loadControlPanel()
 	--------------------------------------------------
 
 	showPage("Home")
-
 	refreshEggs()
 
 end
@@ -788,17 +787,13 @@ buttonStroke.Parent = openButton
 --------------------------------------------------
 
 openButton.MouseEnter:Connect(function()
-
 	openButton.BackgroundColor3 = Color3.fromRGB(92, 124, 255)
 	openButton.Size = UDim2.fromOffset(54, 54)
-
 end)
 
 openButton.MouseLeave:Connect(function()
-
 	openButton.BackgroundColor3 = Color3.fromRGB(30, 33, 43)
 	openButton.Size = UDim2.fromOffset(50, 50)
-
 end)
 
 --------------------------------------------------
@@ -806,7 +801,6 @@ end)
 --------------------------------------------------
 
 openButton.Activated:Connect(function()
-
 	local existingGui = playerGui:FindFirstChild("MyControlPanel")
 
 	if existingGui then
@@ -814,5 +808,4 @@ openButton.Activated:Connect(function()
 	else
 		loadControlPanel()
 	end
-
 end)
