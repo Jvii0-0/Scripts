@@ -746,7 +746,7 @@ local function loadControlPanel()
 end
 
 --------------------------------------------------
--- CREATE FLOATING BUTTON - NOW AT CENTER & DRAGGABLE
+-- CREATE FLOATING BUTTON - CENTER & DRAGGABLE (MOBILE + DESKTOP)
 --------------------------------------------------
 
 local loaderGui = playerGui:FindFirstChild("ControlPanelLoader")
@@ -764,7 +764,7 @@ local openButton = Instance.new("TextButton")
 
 openButton.Name = "OpenButton"
 openButton.Size = UDim2.fromOffset(50, 50)
--- CHANGED: Now positioned at center screen instead of left side
+-- Positioned at center screen
 openButton.Position = UDim2.fromScale(0.5, 0.5)
 openButton.AnchorPoint = Vector2.new(0.5, 0.5)
 openButton.BackgroundColor3 = Color3.fromRGB(30, 33, 43)
@@ -785,41 +785,46 @@ buttonStroke.Transparency = 0.5
 buttonStroke.Parent = openButton
 
 --------------------------------------------------
--- DRAG FUNCTIONALITY
+-- DRAG FUNCTIONALITY (DESKTOP & MOBILE)
 --------------------------------------------------
 
 local dragging = false
 local dragStart = nil
 local startPos = nil
 
+-- Handle desktop mouse dragging
 openButton.InputBegan:Connect(function(input, gameProcessed)
 	if gameProcessed then return end
 	
-	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 		dragging = true
 		dragStart = input.Position
 		startPos = openButton.Position
 	end
 end)
 
+-- Handle mouse/touch movement
 UserInputService.InputChanged:Connect(function(input, gameProcessed)
-	if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-		local delta = input.Position - dragStart
-		openButton.Position = UDim2.fromOffset(
-			startPos.X.Offset + delta.X,
-			startPos.Y.Offset + delta.Y
-		)
+	if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+		if dragStart then
+			local delta = input.Position - dragStart
+			openButton.Position = UDim2.fromOffset(
+				startPos.X.Offset + delta.X,
+				startPos.Y.Offset + delta.Y
+			)
+		end
 	end
 end)
 
+-- Stop dragging
 UserInputService.InputEnded:Connect(function(input, gameProcessed)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 		dragging = false
 	end
 end)
 
 --------------------------------------------------
--- HOVER EFFECT
+-- HOVER EFFECT (DESKTOP ONLY)
 --------------------------------------------------
 
 openButton.MouseEnter:Connect(function()
