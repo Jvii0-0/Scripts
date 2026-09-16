@@ -1,5 +1,6 @@
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
+local PathfindingService = game:GetService("PathfindingService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -135,9 +136,8 @@ local function loadControlPanel()
 	titleBar.Size = UDim2.new(1, 0, 0, 50)
 	titleBar.BackgroundColor3 = colors.panel
 	titleBar.BorderSizePixel = 0
-	titleBar.ZIndex = 1001
 	titleBar.Parent = main
-	titleBar.Active = true
+	titleBar.Active = true -- Enable for dragging
 
 	addCorner(titleBar, 12)
 
@@ -232,6 +232,7 @@ local function loadControlPanel()
 	local pages = {}
 
 	local function createPage(name)
+
 		local page = Instance.new("Frame")
 
 		page.Name = name .. "Page"
@@ -246,6 +247,7 @@ local function loadControlPanel()
 	end
 
 	local function showPage(name)
+
 		for pageName, page in pairs(pages) do
 			page.Visible = pageName == name
 		end
@@ -255,19 +257,16 @@ local function loadControlPanel()
 				tabName == name
 				and colors.accent
 				or colors.button
-
+			
 			local textLabel = tab:FindFirstChildOfClass("TextLabel")
-
 			if textLabel then
-				textLabel.TextColor3 =
-					tabName == name
-					and colors.background
-					or colors.text
+				textLabel.TextColor3 = tabName == name and colors.background or colors.text
 			end
 		end
 	end
 
 	local function createTab(name, icon, order)
+
 		local tab = Instance.new("TextButton")
 
 		tab.Name = name .. "Tab"
@@ -280,14 +279,7 @@ local function loadControlPanel()
 
 		addCorner(tab, 6)
 
-		local tabLabel = createText(
-			tab,
-			icon .. " " .. name,
-			12,
-			colors.text,
-			Enum.Font.GothamMedium
-		)
-
+		local tabLabel = createText(tab, icon .. " " .. name, 12, colors.text, Enum.Font.GothamMedium)
 		tabLabel.Size = UDim2.new(1, 0, 1, 0)
 		tabLabel.Position = UDim2.new(0, 0, 0, 0)
 		tabLabel.TextXAlignment = Enum.TextXAlignment.Center
@@ -432,7 +424,7 @@ local function loadControlPanel()
 
 	eggList.Name = "EggList"
 	eggList.Size = UDim2.new(1, 0, 0, 100)
-	eggList.Position = UDim2.fromOffset(0, 138)
+	eggList.Position = UDim2.fromOffset(0, 100)
 	eggList.BackgroundColor3 = colors.panel
 	eggList.BorderSizePixel = 0
 	eggList.ScrollBarThickness = 4
@@ -468,17 +460,16 @@ local function loadControlPanel()
 		if object.Name and object.Name ~= "" then
 			return object.Name
 		end
-
+		
 		if object:GetAttribute("DisplayName") then
 			return object:GetAttribute("DisplayName")
 		end
-
+		
 		local part = object:FindFirstChild("Part")
-
 		if part and part.Name ~= "" then
 			return part.Name
 		end
-
+		
 		return object.Name or "Unknown Egg"
 	end
 
@@ -528,6 +519,136 @@ local function loadControlPanel()
 	end
 
 	--------------------------------------------------
+	-- MOVEMENT TO SELECTED EGG
+	--------------------------------------------------
+
+	local movementToken = 0
+
+	local function getEggPosition(egg)
+		if not egg or not egg.Parent then
+			return nil
+		end
+
+		if egg:IsA("BasePart") then
+			return egg.Position
+		end
+
+		if egg:IsA("Model") then
+			if egg.PrimaryPart then
+				return egg.PrimaryPart.Position
+			end
+
+			local part = egg:FindFirstChildWhichIsA("BasePart", true)
+
+			if part then
+				return part.Position
+			end
+		end
+
+		return nil
+	end
+
+	local function stopGoingToEgg()
+		movementToken += 1
+
+		local character = player.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+
+		if humanoid then
+			humanoid:MoveTo(character:GetPivot().Position)
+		end
+	end
+
+	local function goToEgg(egg)
+		movementToken += 1
+		local token = movementToken
+
+		if not egg or not egg.Parent then
+			status.Text = "Egg no longer exists"
+			status.TextColor3 = colors.danger
+			return
+		end
+
+		local character = player.Character
+
+		if not character then
+			status.Text = "Character not found"
+			status.TextColor3 = colors.danger
+			return
+		end
+
+		local humanoid = character:FindFirstChildOfClass("Humanoid")
+		local rootPart = character:FindFirstChild("HumanoidRootPart")
+		local targetPosition = getEggPosition(egg)
+
+		if not humanoid or not rootPart or not targetPosition then
+			status.Text = "Could not find egg position"
+			status.TextColor3 = colors.danger
+			return
+		end
+
+		status.Text = "Going to: " .. getEggName(egg)
+		status.TextColor3 = colors.accent
+
+		local path = PathfindingService:CreatePath({
+			AgentRadius = 2,
+			AgentHeight = 5,
+			AgentCanJump = true,
+			AgentCanClimb = true
+		})
+
+		local success = pcall(function()
+			path:ComputeAsync(rootPart.Position, targetPosition)
+		end)
+
+		if not success or path.Status ~= Enum.PathStatus.Success then
+			humanoid:MoveTo(targetPosition)
+			humanoid.MoveToFinished:Wait()
+
+			if token == movementToken then
+				status.Text = "Reached: " .. getEggName(egg)
+				status.TextColor3 = colors.success
+			end
+
+			return
+		end
+
+		for _, waypoint in ipairs(path:GetWaypoints()) do
+			if token ~= movementToken then
+				return
+			end
+
+			if not egg.Parent then
+				status.Text = "Egg no longer exists"
+				status.TextColor3 = colors.danger
+				return
+			end
+
+			if waypoint.Action == Enum.PathWaypointAction.Jump then
+				humanoid.Jump = true
+			end
+
+			humanoid:MoveTo(waypoint.Position)
+
+			local reached = humanoid.MoveToFinished:Wait()
+
+			if not reached then
+				if token == movementToken then
+					status.Text = "Could not reach egg"
+					status.TextColor3 = colors.danger
+				end
+
+				return
+			end
+		end
+
+		if token == movementToken then
+			status.Text = "Reached: " .. getEggName(egg)
+			status.TextColor3 = colors.success
+		end
+	end
+
+	--------------------------------------------------
 	-- CLEAR EGG LIST
 	--------------------------------------------------
 
@@ -573,10 +694,16 @@ local function loadControlPanel()
 
 		button.Activated:Connect(function()
 			if egg and egg.Parent then
+				stopGoingToEgg()
+
 				currentEgg = egg
 				selectedEgg.Text = "🎯 " .. getEggName(egg)
 				status.Text = "Selected: " .. getEggName(egg)
 				status.TextColor3 = colors.success
+
+				task.spawn(function()
+					goToEgg(egg)
+				end)
 			else
 				status.Text = "Egg no longer exists"
 				status.TextColor3 = colors.danger
@@ -623,24 +750,61 @@ local function loadControlPanel()
 	end
 
 	--------------------------------------------------
-	-- INSPECTION RESULTS PANEL
+	-- TAKE EGG FUNCTION
+	--------------------------------------------------
+
+	local function takeEgg(egg)
+		if not egg or not egg.Parent then
+			status.Text = "Egg no longer exists"
+			status.TextColor3 = colors.danger
+			return false
+		end
+
+		local humanoidRootPart = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+		
+		if humanoidRootPart then
+			egg.Parent = player.Backpack or player
+			status.Text = "Took: " .. getEggName(egg)
+			status.TextColor3 = colors.success
+			return true
+		else
+			status.Text = "Character not found"
+			status.TextColor3 = colors.danger
+			return false
+		end
+	end
+
+	--------------------------------------------------
+	-- EGG INSPECTION PANEL
 	--------------------------------------------------
 
 	local inspectionPanel = Instance.new("Frame")
+
 	inspectionPanel.Name = "InspectionPanel"
 	inspectionPanel.Size = UDim2.new(1, 0, 1, -100)
 	inspectionPanel.Position = UDim2.fromOffset(0, 100)
 	inspectionPanel.BackgroundColor3 = colors.panel
 	inspectionPanel.BorderSizePixel = 0
 	inspectionPanel.Visible = false
+	inspectionPanel.ZIndex = 1100
 	inspectionPanel.Parent = eggsPage
+
 	addCorner(inspectionPanel, 8)
 
-	local inspectionTitle = createText(inspectionPanel, "🔍 Egg Inspection", 14, colors.accent, Enum.Font.GothamBold)
+	local inspectionTitle = createText(
+		inspectionPanel,
+		"🔍 Egg Inspection",
+		14,
+		colors.accent,
+		Enum.Font.GothamBold
+	)
+
 	inspectionTitle.Position = UDim2.fromOffset(12, 8)
 	inspectionTitle.Size = UDim2.new(1, -55, 0, 24)
+	inspectionTitle.ZIndex = 1101
 
 	local inspectionClose = Instance.new("TextButton")
+
 	inspectionClose.Size = UDim2.fromOffset(28, 28)
 	inspectionClose.Position = UDim2.new(1, -40, 0, 6)
 	inspectionClose.BackgroundColor3 = colors.button
@@ -649,14 +813,24 @@ local function loadControlPanel()
 	inspectionClose.TextSize = 12
 	inspectionClose.Font = Enum.Font.GothamBold
 	inspectionClose.AutoButtonColor = false
+	inspectionClose.ZIndex = 1101
 	inspectionClose.Parent = inspectionPanel
+
 	addCorner(inspectionClose, 6)
 
-	local inspectionStatus = createText(inspectionPanel, "Select an egg and inspect it.", 10, colors.muted)
+	local inspectionStatus = createText(
+		inspectionPanel,
+		"Select an egg and inspect it.",
+		10,
+		colors.muted
+	)
+
 	inspectionStatus.Position = UDim2.fromOffset(12, 35)
 	inspectionStatus.Size = UDim2.new(1, -24, 0, 18)
+	inspectionStatus.ZIndex = 1101
 
 	local inspectionScroll = Instance.new("ScrollingFrame")
+
 	inspectionScroll.Name = "InspectionResults"
 	inspectionScroll.Size = UDim2.new(1, -20, 1, -65)
 	inspectionScroll.Position = UDim2.fromOffset(10, 60)
@@ -664,66 +838,60 @@ local function loadControlPanel()
 	inspectionScroll.BorderSizePixel = 0
 	inspectionScroll.ScrollBarThickness = 5
 	inspectionScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+	inspectionScroll.ZIndex = 1101
 	inspectionScroll.Parent = inspectionPanel
+
 	addCorner(inspectionScroll, 6)
 
+	local inspectionLayout = Instance.new("UIListLayout")
+
+	inspectionLayout.Padding = UDim.new(0, 4)
+	inspectionLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	inspectionLayout.Parent = inspectionScroll
+
 	local inspectionPadding = Instance.new("UIPadding")
+
 	inspectionPadding.PaddingTop = UDim.new(0, 8)
 	inspectionPadding.PaddingBottom = UDim.new(0, 8)
 	inspectionPadding.PaddingLeft = UDim.new(0, 8)
 	inspectionPadding.PaddingRight = UDim.new(0, 8)
 	inspectionPadding.Parent = inspectionScroll
 
-	local inspectionLayout = Instance.new("UIListLayout")
-	inspectionLayout.Padding = UDim.new(0, 4)
-	inspectionLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	inspectionLayout.Parent = inspectionScroll
-
 	local function clearInspection()
 		for _, child in ipairs(inspectionScroll:GetChildren()) do
-			if child:IsA("TextLabel") then child:Destroy() end
+			if child:IsA("TextLabel") then
+				child:Destroy()
+			end
 		end
 	end
 
-	local function inspectionLine(text, color)
+	local function inspectionLine(text, textColor, height)
 		local label = Instance.new("TextLabel")
-		label.Size = UDim2.new(1, -2, 0, 22)
+
+		label.Size = UDim2.new(1, 0, 0, height or 22)
 		label.BackgroundTransparency = 1
 		label.Text = text
-		label.TextColor3 = color or colors.text
+		label.TextColor3 = textColor or colors.text
 		label.TextSize = 10
 		label.Font = Enum.Font.Gotham
 		label.TextXAlignment = Enum.TextXAlignment.Left
-		label.TextYAlignment = Enum.TextYAlignment.Top
+		label.TextYAlignment = Enum.TextYAlignment.Center
 		label.TextWrapped = true
-		label.AutomaticSize = Enum.AutomaticSize.Y
+		label.ZIndex = 1102
 		label.Parent = inspectionScroll
+
 		return label
 	end
 
 	local function inspectionHeader(text)
-		local label = Instance.new("TextLabel")
-		label.Size = UDim2.new(1, -2, 0, 24)
-		label.BackgroundColor3 = colors.button
-		label.Text = text
-		label.TextColor3 = colors.accent
-		label.TextSize = 10
-		label.Font = Enum.Font.GothamBold
-		label.TextXAlignment = Enum.TextXAlignment.Left
-		label.TextYAlignment = Enum.TextYAlignment.Center
-		label.Parent = inspectionScroll
-		addCorner(label, 4)
-
-		local padding = Instance.new("UIPadding")
-		padding.PaddingLeft = UDim.new(0, 7)
-		padding.Parent = label
-		return label
+		return inspectionLine(
+			text,
+			colors.accent,
+			24
+		)
 	end
 
 	local function formatInspectionValue(value)
-		if typeof(value) == "string" then return '"' .. value .. '"' end
-		if typeof(value) == "Instance" then return value:GetFullName() end
-
 		if typeof(value) == "Vector3" then
 			return string.format(
 				"(%.2f, %.2f, %.2f)",
@@ -733,202 +901,231 @@ local function loadControlPanel()
 			)
 		end
 
+		if typeof(value) == "CFrame" then
+			local position = value.Position
+
+			return string.format(
+				"CFrame(%.2f, %.2f, %.2f)",
+				position.X,
+				position.Y,
+				position.Z
+			)
+		end
+
 		return tostring(value)
 	end
 
 	local function possibleOwnership(name)
-		local n = string.lower(name):gsub("[%s_%-]", "")
+		local lower = string.lower(name)
 
-		return n == "owner"
-			or n == "ownerid"
-			or n == "owneruserid"
-			or n == "userid"
-			or n == "player"
-			or n == "playerid"
-			or n == "claimed"
-			or n == "claimedby"
-			or n == "owned"
-			or n == "isowned"
-			or n == "isclaimed"
-			or n == "belongsto"
-			or string.find(n, "owner", 1, true) ~= nil
-			or string.find(n, "claim", 1, true) ~= nil
-			or string.find(n, "userid", 1, true) ~= nil
-			or string.find(n, "playerid", 1, true) ~= nil
+		local keywords = {
+			"owner",
+			"owned",
+			"userid",
+			"user_id",
+			"player",
+			"playerid",
+			"player_id",
+			"claimed",
+			"claim",
+			"belong"
+		}
+
+		for _, keyword in ipairs(keywords) do
+			if string.find(lower, keyword, 1, true) then
+				return true
+			end
+		end
+
+		return false
 	end
 
 	local function inspectSelectedEgg()
-		clearInspection()
-
 		if not currentEgg or not currentEgg.Parent then
 			inspectionStatus.Text = "No valid egg is selected."
 			inspectionStatus.TextColor3 = colors.danger
-			inspectionHeader("RESULT")
-			inspectionLine("Select an egg from the list first.", colors.danger)
 			return
 		end
 
-		local egg = currentEgg
+		inspectionPanel.Visible = true
+		eggList.Visible = false
+		eggInfo.Visible = false
+		selectedLabel.Visible = false
+		selectedEgg.Visible = false
 
-		inspectionStatus.Text = "Inspection complete: " .. getEggName(egg)
+		clearInspection()
+
+		inspectionStatus.Text = "Inspecting: " .. getEggName(currentEgg)
 		inspectionStatus.TextColor3 = colors.success
 
 		inspectionHeader("BASIC INFORMATION")
-		inspectionLine("Name: " .. egg.Name)
-		inspectionLine("Display Name: " .. getEggName(egg))
-		inspectionLine("Class: " .. egg.ClassName)
-		inspectionLine("Full Path: " .. egg:GetFullName())
-		inspectionLine(
-			"Parent: " ..
-			(egg.Parent and egg.Parent:GetFullName() or "None")
-		)
 
-		local part = egg.PrimaryPart or egg:FindFirstChildWhichIsA("BasePart", true)
+		inspectionLine("Name: " .. currentEgg.Name)
+		inspectionLine("Class: " .. currentEgg.ClassName)
+		inspectionLine("Full Path: " .. currentEgg:GetFullName())
+		inspectionLine("Parent: " .. currentEgg.Parent:GetFullName())
 
-		if part then
-			local p = part.Position
+		local displayName = currentEgg:GetAttribute("DisplayName")
 
-			inspectionLine(string.format(
-				"Position: X %.2f | Y %.2f | Z %.2f",
-				p.X,
-				p.Y,
-				p.Z
-			))
+		if displayName ~= nil then
+			inspectionLine(
+				"DisplayName: " .. formatInspectionValue(displayName)
+			)
+		end
+
+		local primaryPart = currentEgg.PrimaryPart
+
+		if primaryPart then
+			inspectionLine(
+				"PrimaryPart: " .. primaryPart:GetFullName()
+			)
+			inspectionLine(
+				"Position: " .. formatInspectionValue(primaryPart.Position)
+			)
 		else
-			inspectionLine("Position: No BasePart found.", colors.muted)
+			inspectionLine("PrimaryPart: None")
 		end
 
 		inspectionHeader("ATTRIBUTES")
 
-		local attributes = egg:GetAttributes()
-		local names = {}
+		local attributes = currentEgg:GetAttributes()
+		local attributeCount = 0
 
-		for name in pairs(attributes) do
-			table.insert(names, name)
+		for name, value in pairs(attributes) do
+			attributeCount += 1
+
+			local prefix = possibleOwnership(name)
+				and "⚠ POSSIBLE OWNERSHIP: "
+				or ""
+
+			local color = possibleOwnership(name)
+				and colors.danger
+				or colors.text
+
+			inspectionLine(
+				prefix .. name .. " = " .. formatInspectionValue(value),
+				color,
+				possibleOwnership(name) and 30 or 22
+			)
 		end
 
-		table.sort(names, function(a, b)
-			return string.lower(a) < string.lower(b)
-		end)
-
-		if #names == 0 then
+		if attributeCount == 0 then
 			inspectionLine("No attributes found.", colors.muted)
-		else
-			for _, name in ipairs(names) do
-				local owner = possibleOwnership(name)
-
-				local text =
-					(owner and "⚠ POSSIBLE OWNERSHIP: " or "")
-					.. name
-					.. " = "
-					.. formatInspectionValue(attributes[name])
-
-				inspectionLine(
-					text,
-					owner and colors.danger or colors.text
-				)
-			end
 		end
 
 		inspectionHeader("DIRECT CHILDREN")
 
-		local children = egg:GetChildren()
+		local children = currentEgg:GetChildren()
 
 		if #children == 0 then
-			inspectionLine("No direct children found.", colors.muted)
+			inspectionLine("No direct children.", colors.muted)
 		else
-			table.sort(children, function(a, b)
-				return string.lower(a.Name) < string.lower(b.Name)
-			end)
-
 			for _, child in ipairs(children) do
+				local marker = possibleOwnership(child.Name)
+					and "⚠ POSSIBLE OWNERSHIP: "
+					or ""
+
+				local color = possibleOwnership(child.Name)
+					and colors.danger
+					or colors.text
+
 				inspectionLine(
-					child.Name .. " [" .. child.ClassName .. "]"
+					marker .. child.Name .. " [" .. child.ClassName .. "]",
+					color,
+					possibleOwnership(child.Name) and 30 or 22
 				)
+
+				if child:IsA("ValueBase") then
+					inspectionLine(
+						"    Value = " .. formatInspectionValue(child.Value),
+						color
+					)
+				end
 			end
 		end
 
 		inspectionHeader("VALUE OBJECTS")
 
-		local values = {}
+		local valueCount = 0
 
-		for _, object in ipairs(egg:GetDescendants()) do
-			if object:IsA("ValueBase") then
-				table.insert(values, object)
+		for _, descendant in ipairs(currentEgg:GetDescendants()) do
+			if descendant:IsA("ValueBase") then
+				valueCount += 1
+
+				local marker = possibleOwnership(descendant.Name)
+					and "⚠ POSSIBLE OWNERSHIP: "
+					or ""
+
+				local color = possibleOwnership(descendant.Name)
+					and colors.danger
+					or colors.text
+
+				inspectionLine(
+					marker
+						.. descendant:GetFullName()
+						.. " = "
+						.. formatInspectionValue(descendant.Value),
+					color,
+					possibleOwnership(descendant.Name) and 30 or 22
+				)
 			end
 		end
 
-		if #values == 0 then
-			inspectionLine(
-				"No ValueBase objects found.",
-				colors.muted
-			)
-		else
-			table.sort(values, function(a, b)
-				return string.lower(a:GetFullName())
-					< string.lower(b:GetFullName())
-			end)
-
-			for _, object in ipairs(values) do
-				local owner = possibleOwnership(object.Name)
-
-				local text =
-					(owner and "⚠ POSSIBLE OWNERSHIP: " or "")
-					.. object:GetFullName()
-					.. " = "
-					.. formatInspectionValue(object.Value)
-
-				inspectionLine(
-					text,
-					owner and colors.danger or colors.text
-				)
-			end
+		if valueCount == 0 then
+			inspectionLine("No ValueBase objects found.", colors.muted)
 		end
 
 		inspectionHeader("ALL DESCENDANTS")
 
-		local descendants = egg:GetDescendants()
+		local descendants = currentEgg:GetDescendants()
 
 		if #descendants == 0 then
 			inspectionLine("No descendants found.", colors.muted)
 		else
-			table.sort(descendants, function(a, b)
-				return string.lower(a:GetFullName())
-					< string.lower(b:GetFullName())
-			end)
+			for _, descendant in ipairs(descendants) do
+				local marker = possibleOwnership(descendant.Name)
+					and "⚠ POSSIBLE OWNERSHIP: "
+					or ""
 
-			for _, object in ipairs(descendants) do
+				local color = possibleOwnership(descendant.Name)
+					and colors.danger
+					or colors.text
+
 				inspectionLine(
-					object:GetFullName()
-					.. " ["
-					.. object.ClassName
-					.. "]",
-					colors.muted
+					marker
+						.. descendant.Name
+						.. " ["
+						.. descendant.ClassName
+						.. "]",
+					color,
+					possibleOwnership(descendant.Name) and 30 or 22
 				)
 			end
 		end
 
-		task.defer(function()
-			inspectionScroll.CanvasSize = UDim2.new(
-				0,
-				0,
-				0,
-				inspectionLayout.AbsoluteContentSize.Y + 16
-			)
-		end)
+		task.wait()
+
+		inspectionScroll.CanvasSize = UDim2.new(
+			0,
+			0,
+			0,
+			inspectionLayout.AbsoluteContentSize.Y + 16
+		)
 	end
 
 	local inspectButton = Instance.new("TextButton")
-	inspectButton.Name = "InspectSelectedEgg"
-	inspectButton.Size = UDim2.new(1, 0, 0, 32)
-	inspectButton.Position = UDim2.fromOffset(0, 0)
+
+	inspectButton.Size = UDim2.fromOffset(340, 36)
+	inspectButton.Position = UDim2.fromOffset(0, 170)
 	inspectButton.BackgroundColor3 = colors.button
 	inspectButton.Text = "🔍 Inspect Selected Egg"
 	inspectButton.TextColor3 = colors.text
-	inspectButton.TextSize = 11
+	inspectButton.TextSize = 12
 	inspectButton.Font = Enum.Font.GothamBold
 	inspectButton.AutoButtonColor = false
+	inspectButton.ZIndex = 1005
 	inspectButton.Parent = eggsPage
+
 	addCorner(inspectButton, 6)
 
 	inspectButton.MouseEnter:Connect(function()
@@ -940,55 +1137,24 @@ local function loadControlPanel()
 	end)
 
 	inspectButton.Activated:Connect(function()
-		inspectionPanel.Visible = true
-		inspectButton.Visible = false
-		eggList.Visible = false
-		eggInfo.Visible = false
-		eggsTitle.Visible = false
-		selectedLabel.Visible = false
-		selectedEgg.Visible = false
-
 		inspectSelectedEgg()
+	end)
+
+	inspectionClose.MouseEnter:Connect(function()
+		inspectionClose.BackgroundColor3 = colors.buttonHover
+	end)
+
+	inspectionClose.MouseLeave:Connect(function()
+		inspectionClose.BackgroundColor3 = colors.button
 	end)
 
 	inspectionClose.Activated:Connect(function()
 		inspectionPanel.Visible = false
-		inspectButton.Visible = true
 		eggList.Visible = true
 		eggInfo.Visible = true
-		eggsTitle.Visible = true
 		selectedLabel.Visible = true
 		selectedEgg.Visible = true
 	end)
-
-	--------------------------------------------------
-	-- TAKE EGG FUNCTION
-	--------------------------------------------------
-
-	local function takeEgg(egg)
-		if not egg or not egg.Parent then
-			status.Text = "Egg no longer exists"
-			status.TextColor3 = colors.danger
-			return false
-		end
-
-		local humanoidRootPart =
-			player.Character
-			and player.Character:FindFirstChild("HumanoidRootPart")
-
-		if humanoidRootPart then
-			egg.Parent = player.Backpack or player
-
-			status.Text = "Took: " .. getEggName(egg)
-			status.TextColor3 = colors.success
-
-			return true
-		else
-			status.Text = "Character not found"
-			status.TextColor3 = colors.danger
-			return false
-		end
-	end
 
 	--------------------------------------------------
 	-- AUTO TAKE BUTTON
@@ -997,7 +1163,7 @@ local function loadControlPanel()
 	local autoTakeButton = Instance.new("TextButton")
 
 	autoTakeButton.Size = UDim2.fromOffset(340, 36)
-	autoTakeButton.Position = UDim2.fromOffset(0, 248)
+	autoTakeButton.Position = UDim2.fromOffset(0, 210)
 	autoTakeButton.BackgroundColor3 = colors.button
 	autoTakeButton.Text = "🤖 Auto Take: OFF"
 	autoTakeButton.TextColor3 = colors.muted
@@ -1033,7 +1199,6 @@ local function loadControlPanel()
 			else
 				status.Text = "Select an egg first"
 				status.TextColor3 = colors.danger
-
 				autoTake = false
 				autoTakeButton.Text = "🤖 Auto Take: OFF"
 				autoTakeButton.BackgroundColor3 = colors.button
@@ -1145,6 +1310,7 @@ local function loadControlPanel()
 	closeButton.Activated:Connect(function()
 		gui:Destroy()
 	end)
+
 	--------------------------------------------------
 	-- TITLE BAR DRAG FUNCTIONALITY
 	--------------------------------------------------
@@ -1155,10 +1321,8 @@ local function loadControlPanel()
 
 	titleBar.InputBegan:Connect(function(input, gameProcessed)
 		if gameProcessed then return end
-
-		if input.UserInputType == Enum.UserInputType.MouseButton1
-			or input.UserInputType == Enum.UserInputType.Touch then
-
+		
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			dragging = true
 			dragStart = input.Position
 			startPos = main.Position
@@ -1166,15 +1330,9 @@ local function loadControlPanel()
 	end)
 
 	UserInputService.InputChanged:Connect(function(input, gameProcessed)
-		if dragging
-			and (
-				input.UserInputType == Enum.UserInputType.MouseMovement
-				or input.UserInputType == Enum.UserInputType.Touch
-			) then
-
+		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
 			if dragStart then
 				local delta = input.Position - dragStart
-
 				main.Position = UDim2.fromOffset(
 					startPos.X.Offset + delta.X,
 					startPos.Y.Offset + delta.Y
@@ -1184,9 +1342,7 @@ local function loadControlPanel()
 	end)
 
 	UserInputService.InputEnded:Connect(function(input, gameProcessed)
-		if input.UserInputType == Enum.UserInputType.MouseButton1
-			or input.UserInputType == Enum.UserInputType.Touch then
-
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			dragging = false
 		end
 	end)
@@ -1267,10 +1423,8 @@ local startPos = nil
 
 openButton.InputBegan:Connect(function(input, gameProcessed)
 	if gameProcessed then return end
-
-	if input.UserInputType == Enum.UserInputType.MouseButton1
-		or input.UserInputType == Enum.UserInputType.Touch then
-
+	
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 		dragging = true
 		dragStart = input.Position
 		startPos = openButton.Position
@@ -1278,15 +1432,9 @@ openButton.InputBegan:Connect(function(input, gameProcessed)
 end)
 
 UserInputService.InputChanged:Connect(function(input, gameProcessed)
-	if dragging
-		and (
-			input.UserInputType == Enum.UserInputType.MouseMovement
-			or input.UserInputType == Enum.UserInputType.Touch
-		) then
-
+	if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
 		if dragStart then
 			local delta = input.Position - dragStart
-
 			openButton.Position = UDim2.fromOffset(
 				startPos.X.Offset + delta.X,
 				startPos.Y.Offset + delta.Y
@@ -1296,195 +1444,7 @@ UserInputService.InputChanged:Connect(function(input, gameProcessed)
 end)
 
 UserInputService.InputEnded:Connect(function(input, gameProcessed)
-	if input.UserInputType == Enum.UserInputType.MouseButton1
-		or input.UserInputType == Enum.UserInputType.Touch then
-
-		dragging = false
-	end
-end)
-
---------------------------------------------------
--- HOVER EFFECT
---------------------------------------------------
-
-openButton.MouseEnter:Connect(function()
-	openButton.BackgroundColor3 = Color3.fromRGB(120, 170, 255)
-	openButton.Size = UDim2.fromOffset(56, 56)
-end)
-
-openButton.MouseLeave:Connect(function()
-	openButton.BackgroundColor3 = Color3.fromRGB(100, 150, 255)
-	openButton.Size = UDim2.fromOffset(50, 50)
-end)
-
---------------------------------------------------
--- OPEN / CLOSE CONTROL PANEL
---------------------------------------------------
-
-openButton.Activated:Connect(function()
-	local existingGui = playerGui:FindFirstChild("MyControlPanel")
-
-	if existingGui then
-		existingGui:Destroy()
-	else
-		loadControlPanel()
-	end
-end)
-
-	--------------------------------------------------
-	-- TITLE BAR DRAG FUNCTIONALITY
-	--------------------------------------------------
-
-	local dragging = false
-	local dragStart = nil
-	local startPos = nil
-
-	titleBar.InputBegan:Connect(function(input, gameProcessed)
-		if gameProcessed then return end
-
-		if input.UserInputType == Enum.UserInputType.MouseButton1
-			or input.UserInputType == Enum.UserInputType.Touch then
-
-			dragging = true
-			dragStart = input.Position
-			startPos = main.Position
-		end
-	end)
-
-	UserInputService.InputChanged:Connect(function(input, gameProcessed)
-		if dragging
-			and (
-				input.UserInputType == Enum.UserInputType.MouseMovement
-				or input.UserInputType == Enum.UserInputType.Touch
-			) then
-
-			if dragStart then
-				local delta = input.Position - dragStart
-
-				main.Position = UDim2.fromOffset(
-					startPos.X.Offset + delta.X,
-					startPos.Y.Offset + delta.Y
-				)
-			end
-		end
-	end)
-
-	UserInputService.InputEnded:Connect(function(input, gameProcessed)
-		if input.UserInputType == Enum.UserInputType.MouseButton1
-			or input.UserInputType == Enum.UserInputType.Touch then
-
-			dragging = false
-		end
-	end)
-
-	--------------------------------------------------
-	-- AUTO SCAN LOOP
-	--------------------------------------------------
-
-	task.spawn(function()
-		while gui.Parent do
-			if autoScanEnabled then
-				refreshEggs()
-				task.wait(5)
-			else
-				task.wait(1)
-			end
-		end
-	end)
-
-	--------------------------------------------------
-	-- INITIALIZE
-	--------------------------------------------------
-
-	showPage("Eggs")
-	refreshEggs()
-
-end
-
---------------------------------------------------
--- CREATE FLOATING BUTTON - CENTER & DRAGGABLE
---------------------------------------------------
-
-local loaderGui = playerGui:FindFirstChild("ControlPanelLoader")
-
-if loaderGui then
-	loaderGui:Destroy()
-end
-
-loaderGui = Instance.new("ScreenGui")
-loaderGui.Name = "ControlPanelLoader"
-loaderGui.ResetOnSpawn = false
-loaderGui.DisplayOrder = 1000
-loaderGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
-loaderGui.Parent = playerGui
-
-local openButton = Instance.new("TextButton")
-
-openButton.Name = "OpenButton"
-openButton.Size = UDim2.fromOffset(50, 50)
-openButton.Position = UDim2.fromScale(0.5, 0.5)
-openButton.AnchorPoint = Vector2.new(0.5, 0.5)
-openButton.BackgroundColor3 = Color3.fromRGB(100, 150, 255)
-openButton.Text = "🥚"
-openButton.TextColor3 = Color3.fromRGB(245, 248, 255)
-openButton.TextSize = 24
-openButton.Font = Enum.Font.GothamBold
-openButton.AutoButtonColor = false
-openButton.ZIndex = 2000
-openButton.Parent = loaderGui
-
-local buttonCorner = Instance.new("UICorner")
-buttonCorner.CornerRadius = UDim.new(0, 12)
-buttonCorner.Parent = openButton
-
-local buttonStroke = Instance.new("UIStroke")
-buttonStroke.Color = Color3.fromRGB(100, 150, 255)
-buttonStroke.Thickness = 2
-buttonStroke.Transparency = 0.3
-buttonStroke.Parent = openButton
-
---------------------------------------------------
--- DRAG FUNCTIONALITY (DESKTOP & MOBILE)
---------------------------------------------------
-
-local dragging = false
-local dragStart = nil
-local startPos = nil
-
-openButton.InputBegan:Connect(function(input, gameProcessed)
-	if gameProcessed then return end
-
-	if input.UserInputType == Enum.UserInputType.MouseButton1
-		or input.UserInputType == Enum.UserInputType.Touch then
-
-		dragging = true
-		dragStart = input.Position
-		startPos = openButton.Position
-	end
-end)
-
-UserInputService.InputChanged:Connect(function(input, gameProcessed)
-	if dragging
-		and (
-			input.UserInputType == Enum.UserInputType.MouseMovement
-			or input.UserInputType == Enum.UserInputType.Touch
-		) then
-
-		if dragStart then
-			local delta = input.Position - dragStart
-
-			openButton.Position = UDim2.fromOffset(
-				startPos.X.Offset + delta.X,
-				startPos.Y.Offset + delta.Y
-			)
-		end
-	end
-end)
-
-UserInputService.InputEnded:Connect(function(input, gameProcessed)
-	if input.UserInputType == Enum.UserInputType.MouseButton1
-		or input.UserInputType == Enum.UserInputType.Touch then
-
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 		dragging = false
 	end
 end)
