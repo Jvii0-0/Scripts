@@ -1,4 +1,5 @@
-```lua
+local function loadControlPanel()
+
 -- Self-contained Roblox LocalScript UI
 -- Place this in StarterPlayerScripts or StarterGui
 -- Intended for your own Roblox experience
@@ -733,4 +734,7 @@ end)
 showPage("Home")
 
 refreshEggs()
-```
+
+end
+
+loadControlPanel()
