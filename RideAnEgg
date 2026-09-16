@@ -550,13 +550,6 @@ local function loadControlPanel()
 
 	local function stopGoingToEgg()
 		movementToken += 1
-
-		local character = player.Character
-		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-
-		if humanoid then
-			humanoid:MoveTo(character:GetPivot().Position)
-		end
 	end
 
 	local function goToEgg(egg)
@@ -570,15 +563,8 @@ local function loadControlPanel()
 		end
 
 		local character = player.Character
-
-		if not character then
-			status.Text = "Character not found"
-			status.TextColor3 = colors.danger
-			return
-		end
-
-		local humanoid = character:FindFirstChildOfClass("Humanoid")
-		local rootPart = character:FindFirstChild("HumanoidRootPart")
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		local rootPart = character and character:FindFirstChild("HumanoidRootPart")
 		local targetPosition = getEggPosition(egg)
 
 		if not humanoid or not rootPart or not targetPosition then
@@ -601,15 +587,12 @@ local function loadControlPanel()
 			path:ComputeAsync(rootPart.Position, targetPosition)
 		end)
 
+		if token ~= movementToken then
+			return
+		end
+
 		if not success or path.Status ~= Enum.PathStatus.Success then
 			humanoid:MoveTo(targetPosition)
-			humanoid.MoveToFinished:Wait()
-
-			if token == movementToken then
-				status.Text = "Reached: " .. getEggName(egg)
-				status.TextColor3 = colors.success
-			end
-
 			return
 		end
 
@@ -633,11 +616,8 @@ local function loadControlPanel()
 			local reached = humanoid.MoveToFinished:Wait()
 
 			if not reached then
-				if token == movementToken then
-					status.Text = "Could not reach egg"
-					status.TextColor3 = colors.danger
-				end
-
+				status.Text = "Could not reach egg"
+				status.TextColor3 = colors.danger
 				return
 			end
 		end
@@ -775,11 +755,10 @@ local function loadControlPanel()
 	end
 
 	--------------------------------------------------
-	-- EGG INSPECTION PANEL
+	-- INSPECTION PANEL
 	--------------------------------------------------
 
 	local inspectionPanel = Instance.new("Frame")
-
 	inspectionPanel.Name = "InspectionPanel"
 	inspectionPanel.Size = UDim2.new(1, 0, 1, -100)
 	inspectionPanel.Position = UDim2.fromOffset(0, 100)
@@ -788,34 +767,29 @@ local function loadControlPanel()
 	inspectionPanel.Visible = false
 	inspectionPanel.ZIndex = 1100
 	inspectionPanel.Parent = eggsPage
-
 	addCorner(inspectionPanel, 8)
 
 	local inspectionTitle = createText(
 		inspectionPanel,
-		"🔍 Egg Inspection",
+		"Egg Inspection",
 		14,
 		colors.accent,
 		Enum.Font.GothamBold
 	)
-
 	inspectionTitle.Position = UDim2.fromOffset(12, 8)
 	inspectionTitle.Size = UDim2.new(1, -55, 0, 24)
 	inspectionTitle.ZIndex = 1101
 
 	local inspectionClose = Instance.new("TextButton")
-
 	inspectionClose.Size = UDim2.fromOffset(28, 28)
 	inspectionClose.Position = UDim2.new(1, -40, 0, 6)
 	inspectionClose.BackgroundColor3 = colors.button
-	inspectionClose.Text = "✕"
+	inspectionClose.Text = "X"
 	inspectionClose.TextColor3 = colors.text
 	inspectionClose.TextSize = 12
 	inspectionClose.Font = Enum.Font.GothamBold
-	inspectionClose.AutoButtonColor = false
 	inspectionClose.ZIndex = 1101
 	inspectionClose.Parent = inspectionPanel
-
 	addCorner(inspectionClose, 6)
 
 	local inspectionStatus = createText(
@@ -824,13 +798,11 @@ local function loadControlPanel()
 		10,
 		colors.muted
 	)
-
 	inspectionStatus.Position = UDim2.fromOffset(12, 35)
 	inspectionStatus.Size = UDim2.new(1, -24, 0, 18)
 	inspectionStatus.ZIndex = 1101
 
 	local inspectionScroll = Instance.new("ScrollingFrame")
-
 	inspectionScroll.Name = "InspectionResults"
 	inspectionScroll.Size = UDim2.new(1, -20, 1, -65)
 	inspectionScroll.Position = UDim2.fromOffset(10, 60)
@@ -840,17 +812,14 @@ local function loadControlPanel()
 	inspectionScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 	inspectionScroll.ZIndex = 1101
 	inspectionScroll.Parent = inspectionPanel
-
 	addCorner(inspectionScroll, 6)
 
 	local inspectionLayout = Instance.new("UIListLayout")
-
-	inspectionLayout.Padding = UDim.new(0, 4)
+	inspectionLayout.Padding = UDim.new(0, 3)
 	inspectionLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	inspectionLayout.Parent = inspectionScroll
 
 	local inspectionPadding = Instance.new("UIPadding")
-
 	inspectionPadding.PaddingTop = UDim.new(0, 8)
 	inspectionPadding.PaddingBottom = UDim.new(0, 8)
 	inspectionPadding.PaddingLeft = UDim.new(0, 8)
@@ -865,10 +834,9 @@ local function loadControlPanel()
 		end
 	end
 
-	local function inspectionLine(text, textColor, height)
+	local function addInspectionLine(text, textColor)
 		local label = Instance.new("TextLabel")
-
-		label.Size = UDim2.new(1, 0, 0, height or 22)
+		label.Size = UDim2.new(1, 0, 0, 22)
 		label.BackgroundTransparency = 1
 		label.Text = text
 		label.TextColor3 = textColor or colors.text
@@ -879,70 +847,11 @@ local function loadControlPanel()
 		label.TextWrapped = true
 		label.ZIndex = 1102
 		label.Parent = inspectionScroll
-
-		return label
-	end
-
-	local function inspectionHeader(text)
-		return inspectionLine(
-			text,
-			colors.accent,
-			24
-		)
-	end
-
-	local function formatInspectionValue(value)
-		if typeof(value) == "Vector3" then
-			return string.format(
-				"(%.2f, %.2f, %.2f)",
-				value.X,
-				value.Y,
-				value.Z
-			)
-		end
-
-		if typeof(value) == "CFrame" then
-			local position = value.Position
-
-			return string.format(
-				"CFrame(%.2f, %.2f, %.2f)",
-				position.X,
-				position.Y,
-				position.Z
-			)
-		end
-
-		return tostring(value)
-	end
-
-	local function possibleOwnership(name)
-		local lower = string.lower(name)
-
-		local keywords = {
-			"owner",
-			"owned",
-			"userid",
-			"user_id",
-			"player",
-			"playerid",
-			"player_id",
-			"claimed",
-			"claim",
-			"belong"
-		}
-
-		for _, keyword in ipairs(keywords) do
-			if string.find(lower, keyword, 1, true) then
-				return true
-			end
-		end
-
-		return false
 	end
 
 	local function inspectSelectedEgg()
 		if not currentEgg or not currentEgg.Parent then
-			inspectionStatus.Text = "No valid egg is selected."
+			inspectionStatus.Text = "No valid egg selected."
 			inspectionStatus.TextColor3 = colors.danger
 			return
 		end
@@ -958,149 +867,60 @@ local function loadControlPanel()
 		inspectionStatus.Text = "Inspecting: " .. getEggName(currentEgg)
 		inspectionStatus.TextColor3 = colors.success
 
-		inspectionHeader("BASIC INFORMATION")
-
-		inspectionLine("Name: " .. currentEgg.Name)
-		inspectionLine("Class: " .. currentEgg.ClassName)
-		inspectionLine("Full Path: " .. currentEgg:GetFullName())
-		inspectionLine("Parent: " .. currentEgg.Parent:GetFullName())
-
-		local displayName = currentEgg:GetAttribute("DisplayName")
-
-		if displayName ~= nil then
-			inspectionLine(
-				"DisplayName: " .. formatInspectionValue(displayName)
-			)
-		end
-
-		local primaryPart = currentEgg.PrimaryPart
-
-		if primaryPart then
-			inspectionLine(
-				"PrimaryPart: " .. primaryPart:GetFullName()
-			)
-			inspectionLine(
-				"Position: " .. formatInspectionValue(primaryPart.Position)
-			)
-		else
-			inspectionLine("PrimaryPart: None")
-		end
-
-		inspectionHeader("ATTRIBUTES")
+		addInspectionLine("=== BASIC INFORMATION ===", colors.accent)
+		addInspectionLine("Name: " .. currentEgg.Name)
+		addInspectionLine("Class: " .. currentEgg.ClassName)
+		addInspectionLine("Path: " .. currentEgg:GetFullName())
+		addInspectionLine("Parent: " .. currentEgg.Parent:GetFullName())
 
 		local attributes = currentEgg:GetAttributes()
+		addInspectionLine("=== ATTRIBUTES ===", colors.accent)
+
 		local attributeCount = 0
 
 		for name, value in pairs(attributes) do
 			attributeCount += 1
-
-			local prefix = possibleOwnership(name)
-				and "⚠ POSSIBLE OWNERSHIP: "
-				or ""
-
-			local color = possibleOwnership(name)
-				and colors.danger
-				or colors.text
-
-			inspectionLine(
-				prefix .. name .. " = " .. formatInspectionValue(value),
-				color,
-				possibleOwnership(name) and 30 or 22
+			addInspectionLine(
+				name .. " = " .. tostring(value),
+				colors.text
 			)
 		end
 
 		if attributeCount == 0 then
-			inspectionLine("No attributes found.", colors.muted)
+			addInspectionLine("No attributes found.", colors.muted)
 		end
 
-		inspectionHeader("DIRECT CHILDREN")
+		addInspectionLine("=== DIRECT CHILDREN ===", colors.accent)
 
 		local children = currentEgg:GetChildren()
 
 		if #children == 0 then
-			inspectionLine("No direct children.", colors.muted)
+			addInspectionLine("No direct children.", colors.muted)
 		else
 			for _, child in ipairs(children) do
-				local marker = possibleOwnership(child.Name)
-					and "⚠ POSSIBLE OWNERSHIP: "
-					or ""
-
-				local color = possibleOwnership(child.Name)
-					and colors.danger
-					or colors.text
-
-				inspectionLine(
-					marker .. child.Name .. " [" .. child.ClassName .. "]",
-					color,
-					possibleOwnership(child.Name) and 30 or 22
+				addInspectionLine(
+					child.Name .. " [" .. child.ClassName .. "]"
 				)
-
-				if child:IsA("ValueBase") then
-					inspectionLine(
-						"    Value = " .. formatInspectionValue(child.Value),
-						color
-					)
-				end
 			end
 		end
 
-		inspectionHeader("VALUE OBJECTS")
+		addInspectionLine("=== VALUE OBJECTS ===", colors.accent)
 
 		local valueCount = 0
 
 		for _, descendant in ipairs(currentEgg:GetDescendants()) do
 			if descendant:IsA("ValueBase") then
 				valueCount += 1
-
-				local marker = possibleOwnership(descendant.Name)
-					and "⚠ POSSIBLE OWNERSHIP: "
-					or ""
-
-				local color = possibleOwnership(descendant.Name)
-					and colors.danger
-					or colors.text
-
-				inspectionLine(
-					marker
-						.. descendant:GetFullName()
+				addInspectionLine(
+					descendant:GetFullName()
 						.. " = "
-						.. formatInspectionValue(descendant.Value),
-					color,
-					possibleOwnership(descendant.Name) and 30 or 22
+						.. tostring(descendant.Value)
 				)
 			end
 		end
 
 		if valueCount == 0 then
-			inspectionLine("No ValueBase objects found.", colors.muted)
-		end
-
-		inspectionHeader("ALL DESCENDANTS")
-
-		local descendants = currentEgg:GetDescendants()
-
-		if #descendants == 0 then
-			inspectionLine("No descendants found.", colors.muted)
-		else
-			for _, descendant in ipairs(descendants) do
-				local marker = possibleOwnership(descendant.Name)
-					and "⚠ POSSIBLE OWNERSHIP: "
-					or ""
-
-				local color = possibleOwnership(descendant.Name)
-					and colors.danger
-					or colors.text
-
-				inspectionLine(
-					marker
-						.. descendant.Name
-						.. " ["
-						.. descendant.ClassName
-						.. "]",
-					color,
-					possibleOwnership(descendant.Name) and 30 or 22
-				)
-			end
+			addInspectionLine("No ValueBase objects found.", colors.muted)
 		end
 
 		task.wait()
@@ -1114,39 +934,18 @@ local function loadControlPanel()
 	end
 
 	local inspectButton = Instance.new("TextButton")
-
 	inspectButton.Size = UDim2.fromOffset(340, 36)
 	inspectButton.Position = UDim2.fromOffset(0, 170)
 	inspectButton.BackgroundColor3 = colors.button
-	inspectButton.Text = "🔍 Inspect Selected Egg"
+	inspectButton.Text = "Inspect Selected Egg"
 	inspectButton.TextColor3 = colors.text
 	inspectButton.TextSize = 12
 	inspectButton.Font = Enum.Font.GothamBold
-	inspectButton.AutoButtonColor = false
 	inspectButton.ZIndex = 1005
 	inspectButton.Parent = eggsPage
-
 	addCorner(inspectButton, 6)
 
-	inspectButton.MouseEnter:Connect(function()
-		inspectButton.BackgroundColor3 = colors.buttonHover
-	end)
-
-	inspectButton.MouseLeave:Connect(function()
-		inspectButton.BackgroundColor3 = colors.button
-	end)
-
-	inspectButton.Activated:Connect(function()
-		inspectSelectedEgg()
-	end)
-
-	inspectionClose.MouseEnter:Connect(function()
-		inspectionClose.BackgroundColor3 = colors.buttonHover
-	end)
-
-	inspectionClose.MouseLeave:Connect(function()
-		inspectionClose.BackgroundColor3 = colors.button
-	end)
+	inspectButton.Activated:Connect(inspectSelectedEgg)
 
 	inspectionClose.Activated:Connect(function()
 		inspectionPanel.Visible = false
