@@ -39,15 +39,17 @@ local function loadControlPanel()
 	--------------------------------------------------
 
 	local colors = {
-		background = Color3.fromRGB(22, 24, 31),
-		panel = Color3.fromRGB(30, 33, 43),
-		sidebar = Color3.fromRGB(26, 28, 36),
-		button = Color3.fromRGB(43, 47, 60),
-		accent = Color3.fromRGB(92, 124, 255),
-		text = Color3.fromRGB(240, 242, 248),
-		muted = Color3.fromRGB(160, 165, 180),
-		success = Color3.fromRGB(55, 190, 105),
-		danger = Color3.fromRGB(220, 75, 75)
+		background = Color3.fromRGB(15, 17, 23),
+		panel = Color3.fromRGB(25, 28, 38),
+		sidebar = Color3.fromRGB(20, 23, 32),
+		button = Color3.fromRGB(40, 44, 58),
+		buttonHover = Color3.fromRGB(50, 55, 72),
+		accent = Color3.fromRGB(100, 150, 255),
+		accentDark = Color3.fromRGB(70, 110, 220),
+		text = Color3.fromRGB(245, 248, 255),
+		muted = Color3.fromRGB(150, 160, 180),
+		success = Color3.fromRGB(80, 200, 120),
+		danger = Color3.fromRGB(255, 100, 100)
 	}
 
 	--------------------------------------------------
@@ -58,6 +60,14 @@ local function loadControlPanel()
 		local corner = Instance.new("UICorner")
 		corner.CornerRadius = UDim.new(0, radius)
 		corner.Parent = instance
+	end
+
+	local function addStroke(instance, color, thickness)
+		local stroke = Instance.new("UIStroke")
+		stroke.Color = color
+		stroke.Thickness = thickness or 1
+		stroke.Transparency = 0.7
+		stroke.Parent = instance
 	end
 
 	local function addPadding(instance, amount)
@@ -96,7 +106,7 @@ local function loadControlPanel()
 	gui.Parent = playerGui
 
 	--------------------------------------------------
-	-- MAIN WINDOW - SMALLER SIZE, NOT FULLSCREEN
+	-- MAIN WINDOW - COMPACT, RIGHT SIDE
 	--------------------------------------------------
 
 	local main = Instance.new("Frame")
@@ -109,41 +119,44 @@ local function loadControlPanel()
 	main.BorderSizePixel = 0
 	main.Parent = gui
 
-	addCorner(main, 10)
+	addCorner(main, 12)
+	addStroke(main, colors.accent, 1.5)
 
 	--------------------------------------------------
-	-- TITLE BAR
+	-- TITLE BAR - DRAGGABLE
 	--------------------------------------------------
 
 	local titleBar = Instance.new("Frame")
 
-	titleBar.Size = UDim2.new(1, 0, 0, 54)
+	titleBar.Name = "TitleBar"
+	titleBar.Size = UDim2.new(1, 0, 0, 50)
 	titleBar.BackgroundColor3 = colors.panel
 	titleBar.BorderSizePixel = 0
 	titleBar.Parent = main
+	titleBar.Active = true -- Enable for dragging
 
-	addCorner(titleBar, 10)
+	addCorner(titleBar, 12)
 
 	local title = createText(
 		titleBar,
-		"My Control Panel",
-		18,
-		colors.text,
+		"🥚 Egg Tracker",
+		16,
+		colors.accent,
 		Enum.Font.GothamBold
 	)
 
-	title.Position = UDim2.fromOffset(20, 8)
-	title.Size = UDim2.new(1, -130, 0, 24)
+	title.Position = UDim2.fromOffset(16, 8)
+	title.Size = UDim2.new(1, -120, 0, 24)
 
 	local subtitle = createText(
 		titleBar,
-		"Egg targeting interface",
-		12,
+		"Auto-scanning for eggs",
+		11,
 		colors.muted
 	)
 
-	subtitle.Position = UDim2.fromOffset(20, 30)
-	subtitle.Size = UDim2.new(1, -130, 0, 18)
+	subtitle.Position = UDim2.fromOffset(16, 26)
+	subtitle.Size = UDim2.new(1, -120, 0, 16)
 
 	--------------------------------------------------
 	-- TOP BUTTONS
@@ -152,24 +165,32 @@ local function loadControlPanel()
 	local function createTopButton(text, xOffset)
 		local button = Instance.new("TextButton")
 
-		button.Size = UDim2.fromOffset(34, 30)
-		button.Position = UDim2.new(1, xOffset, 0, 12)
-		button.AnchorPoint = Vector2.new(1, 0)
+		button.Size = UDim2.fromOffset(32, 32)
+		button.Position = UDim2.new(1, xOffset, 0.5, -16)
+		button.AnchorPoint = Vector2.new(0.5, 0.5)
 		button.BackgroundColor3 = colors.button
 		button.Text = text
 		button.TextColor3 = colors.text
-		button.TextSize = 16
+		button.TextSize = 14
 		button.Font = Enum.Font.GothamBold
 		button.AutoButtonColor = true
 		button.Parent = titleBar
 
-		addCorner(button, 7)
+		addCorner(button, 6)
+
+		button.MouseEnter:Connect(function()
+			button.BackgroundColor3 = colors.buttonHover
+		end)
+
+		button.MouseLeave:Connect(function()
+			button.BackgroundColor3 = colors.button
+		end)
 
 		return button
 	end
 
-	local closeButton = createTopButton("×", -14)
-	local minimizeButton = createTopButton("−", -56)
+	local closeButton = createTopButton("✕", -16)
+	local minimizeButton = createTopButton("−", -54)
 
 	--------------------------------------------------
 	-- SIDEBAR
@@ -177,13 +198,13 @@ local function loadControlPanel()
 
 	local sidebar = Instance.new("Frame")
 
-	sidebar.Size = UDim2.new(0, 155, 1, -54)
-	sidebar.Position = UDim2.fromOffset(0, 54)
+	sidebar.Size = UDim2.new(0, 120, 1, -50)
+	sidebar.Position = UDim2.fromOffset(0, 50)
 	sidebar.BackgroundColor3 = colors.sidebar
 	sidebar.BorderSizePixel = 0
 	sidebar.Parent = main
 
-	addPadding(sidebar, 14)
+	addPadding(sidebar, 10)
 
 	--------------------------------------------------
 	-- CONTENT
@@ -191,13 +212,13 @@ local function loadControlPanel()
 
 	local content = Instance.new("Frame")
 
-	content.Size = UDim2.new(1, -155, 1, -54)
-	content.Position = UDim2.fromOffset(155, 54)
+	content.Size = UDim2.new(1, -120, 1, -50)
+	content.Position = UDim2.fromOffset(120, 50)
 	content.BackgroundTransparency = 1
 	content.BorderSizePixel = 0
 	content.Parent = main
 
-	addPadding(content, 22)
+	addPadding(content, 16)
 
 	--------------------------------------------------
 	-- TABS AND PAGES
@@ -232,32 +253,47 @@ local function loadControlPanel()
 				tabName == name
 				and colors.accent
 				or colors.button
+			
+			local textLabel = tab:FindFirstChildOfClass("TextLabel")
+			if textLabel then
+				textLabel.TextColor3 = tabName == name and colors.background or colors.text
+			end
 		end
 	end
 
-	local function createTab(name, order)
+	local function createTab(name, icon, order)
 
 		local tab = Instance.new("TextButton")
 
 		tab.Name = name .. "Tab"
-		tab.Size = UDim2.new(1, 0, 0, 42)
+		tab.Size = UDim2.new(1, 0, 0, 38)
 		tab.LayoutOrder = order
 		tab.BackgroundColor3 = colors.button
-		tab.Text = name
-		tab.TextColor3 = colors.text
-		tab.TextSize = 14
-		tab.Font = Enum.Font.GothamMedium
-		tab.TextXAlignment = Enum.TextXAlignment.Left
-		tab.AutoButtonColor = true
+		tab.Text = ""
+		tab.AutoButtonColor = false
 		tab.Parent = sidebar
 
-		addCorner(tab, 7)
+		addCorner(tab, 6)
 
-		local padding = Instance.new("UIPadding")
-		padding.PaddingLeft = UDim.new(0, 12)
-		padding.Parent = tab
+		local tabLabel = createText(tab, icon .. " " .. name, 12, colors.text, Enum.Font.GothamMedium)
+		tabLabel.Size = UDim2.new(1, 0, 1, 0)
+		tabLabel.Position = UDim2.new(0, 0, 0, 0)
+		tabLabel.TextXAlignment = Enum.TextXAlignment.Center
+		tabLabel.TextYAlignment = Enum.TextYAlignment.Center
 
 		tabs[name] = tab
+
+		tab.MouseEnter:Connect(function()
+			if tab.BackgroundColor3 ~= colors.accent then
+				tab.BackgroundColor3 = colors.buttonHover
+			end
+		end)
+
+		tab.MouseLeave:Connect(function()
+			if tab.BackgroundColor3 ~= colors.accent then
+				tab.BackgroundColor3 = colors.button
+			end
+		end)
 
 		tab.Activated:Connect(function()
 			showPage(name)
@@ -270,9 +306,9 @@ local function loadControlPanel()
 	tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	tabLayout.Parent = sidebar
 
-	createTab("Home", 1)
-	createTab("Eggs", 2)
-	createTab("Settings", 3)
+	createTab("Home", "🏠", 1)
+	createTab("Eggs", "🥚", 2)
+	createTab("Settings", "⚙️", 3)
 
 	--------------------------------------------------
 	-- HOME PAGE
@@ -283,33 +319,45 @@ local function loadControlPanel()
 	local homeTitle = createText(
 		home,
 		"Welcome",
-		24,
-		colors.text,
+		20,
+		colors.accent,
 		Enum.Font.GothamBold
 	)
 
-	homeTitle.Size = UDim2.new(1, 0, 0, 34)
+	homeTitle.Size = UDim2.new(1, 0, 0, 28)
 
 	local homeDescription = createText(
 		home,
-		"Auto-scanning for eggs...",
-		14,
+		"Auto-scanning enabled\nEgg list updates every 5 seconds",
+		12,
 		colors.muted
 	)
 
-	homeDescription.Position = UDim2.fromOffset(0, 40)
-	homeDescription.Size = UDim2.new(1, 0, 0, 42)
+	homeDescription.Position = UDim2.fromOffset(0, 35)
+	homeDescription.Size = UDim2.new(1, 0, 0, 50)
 	homeDescription.TextWrapped = true
+	homeDescription.TextYAlignment = Enum.TextYAlignment.Top
 
 	local status = createText(
 		home,
-		"Status: Initializing...",
-		14,
-		colors.text
+		"Status: Ready",
+		11,
+		colors.success
 	)
 
 	status.Position = UDim2.fromOffset(0, 95)
-	status.Size = UDim2.new(1, 0, 0, 28)
+	status.Size = UDim2.new(1, 0, 0, 24)
+
+	local eggCountHome = createText(
+		home,
+		"Eggs Found: 0",
+		13,
+		colors.accent,
+		Enum.Font.GothamBold
+	)
+
+	eggCountHome.Position = UDim2.fromOffset(0, 130)
+	eggCountHome.Size = UDim2.new(1, 0, 0, 24)
 
 	--------------------------------------------------
 	-- EGG PAGE
@@ -319,23 +367,23 @@ local function loadControlPanel()
 
 	local eggsTitle = createText(
 		eggsPage,
-		"Egg Targeting",
-		24,
-		colors.text,
+		"Available Eggs",
+		16,
+		colors.accent,
 		Enum.Font.GothamBold
 	)
 
-	eggsTitle.Size = UDim2.new(1, 0, 0, 34)
+	eggsTitle.Size = UDim2.new(1, 0, 0, 28)
 
 	local eggInfo = createText(
 		eggsPage,
 		"Eggs found: 0",
-		14,
+		11,
 		colors.muted
 	)
 
-	eggInfo.Position = UDim2.fromOffset(0, 40)
-	eggInfo.Size = UDim2.new(1, 0, 0, 24)
+	eggInfo.Position = UDim2.fromOffset(0, 32)
+	eggInfo.Size = UDim2.new(1, 0, 0, 18)
 
 	--------------------------------------------------
 	-- SELECTED EGG DISPLAY
@@ -344,23 +392,24 @@ local function loadControlPanel()
 	local selectedLabel = createText(
 		eggsPage,
 		"Selected Egg",
-		14,
+		11,
 		colors.text,
 		Enum.Font.GothamMedium
 	)
 
-	selectedLabel.Position = UDim2.fromOffset(0, 72)
-	selectedLabel.Size = UDim2.new(1, 0, 0, 24)
+	selectedLabel.Position = UDim2.fromOffset(0, 55)
+	selectedLabel.Size = UDim2.new(1, 0, 0, 16)
 
 	local selectedEgg = createText(
 		eggsPage,
 		"None",
-		14,
-		colors.muted
+		12,
+		colors.accent,
+		Enum.Font.GothamBold
 	)
 
-	selectedEgg.Position = UDim2.fromOffset(0, 98)
-	selectedEgg.Size = UDim2.new(1, -20, 0, 24)
+	selectedEgg.Position = UDim2.fromOffset(0, 72)
+	selectedEgg.Size = UDim2.new(1, -10, 0, 20)
 	selectedEgg.TextTruncate = Enum.TextTruncate.AtEnd
 
 	--------------------------------------------------
@@ -370,11 +419,11 @@ local function loadControlPanel()
 	local eggList = Instance.new("ScrollingFrame")
 
 	eggList.Name = "EggList"
-	eggList.Size = UDim2.new(1, 0, 0, 115)
-	eggList.Position = UDim2.fromOffset(0, 128)
+	eggList.Size = UDim2.new(1, 0, 0, 100)
+	eggList.Position = UDim2.fromOffset(0, 100)
 	eggList.BackgroundColor3 = colors.panel
 	eggList.BorderSizePixel = 0
-	eggList.ScrollBarThickness = 5
+	eggList.ScrollBarThickness = 4
 	eggList.CanvasSize = UDim2.new(0, 0, 0, 0)
 	eggList.Parent = eggsPage
 
@@ -382,16 +431,16 @@ local function loadControlPanel()
 
 	local eggListLayout = Instance.new("UIListLayout")
 
-	eggListLayout.Padding = UDim.new(0, 5)
+	eggListLayout.Padding = UDim.new(0, 4)
 	eggListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	eggListLayout.Parent = eggList
 
 	local eggListPadding = Instance.new("UIPadding")
 
-	eggListPadding.PaddingTop = UDim.new(0, 7)
-	eggListPadding.PaddingBottom = UDim.new(0, 7)
-	eggListPadding.PaddingLeft = UDim.new(0, 7)
-	eggListPadding.PaddingRight = UDim.new(0, 7)
+	eggListPadding.PaddingTop = UDim.new(0, 5)
+	eggListPadding.PaddingBottom = UDim.new(0, 5)
+	eggListPadding.PaddingLeft = UDim.new(0, 5)
+	eggListPadding.PaddingRight = UDim.new(0, 5)
 	eggListPadding.Parent = eggList
 
 	--------------------------------------------------
@@ -404,9 +453,6 @@ local function loadControlPanel()
 	local autoScanEnabled = true
 
 	local function getEggName(object)
-		-- Try to get the actual egg display name
-		-- Priority: Object name > DisplayName attribute > Part name
-		
 		if object.Name and object.Name ~= "" then
 			return object.Name
 		end
@@ -415,7 +461,6 @@ local function loadControlPanel()
 			return object:GetAttribute("DisplayName")
 		end
 		
-		-- Check for a Part with a name inside
 		local part = object:FindFirstChild("Part")
 		if part and part.Name ~= "" then
 			return part.Name
@@ -425,17 +470,14 @@ local function loadControlPanel()
 	end
 
 	local function isEgg(object)
-		-- Validate object still exists
 		if not object or not object.Parent then
 			return false
 		end
 
-		-- Option 1: Explicit IsEgg attribute
 		if object:GetAttribute("IsEgg") == true then
 			return true
 		end
 
-		-- Option 2: Name contains "Egg"
 		if string.find(
 			string.lower(object.Name),
 			"egg",
@@ -451,7 +493,6 @@ local function loadControlPanel()
 	local function findEggs()
 		table.clear(foundEggs)
 
-		-- Add pcall to prevent crash on large workspaces
 		local success, result = pcall(function()
 			for _, object in ipairs(workspace:GetDescendants()) do
 				if object:IsA("Model") and isEgg(object) then
@@ -465,7 +506,6 @@ local function loadControlPanel()
 			return foundEggs
 		end
 
-		-- Sort by actual egg name
 		table.sort(foundEggs, function(a, b)
 			if not a.Parent or not b.Parent then return false end
 			return string.lower(getEggName(a)) < string.lower(getEggName(b))
@@ -493,30 +533,40 @@ local function loadControlPanel()
 	local function createEggButton(egg, order)
 		local button = Instance.new("TextButton")
 
-		button.Size = UDim2.new(1, 0, 0, 30)
+		button.Size = UDim2.new(1, 0, 0, 28)
 		button.LayoutOrder = order
 		button.BackgroundColor3 = colors.button
-		-- Use actual egg name
 		button.Text = getEggName(egg)
 		button.TextColor3 = colors.text
-		button.TextSize = 13
+		button.TextSize = 11
 		button.Font = Enum.Font.GothamMedium
 		button.TextXAlignment = Enum.TextXAlignment.Left
+		button.AutoButtonColor = false
 		button.Parent = eggList
 
-		addCorner(button, 6)
+		addCorner(button, 5)
 
 		local padding = Instance.new("UIPadding")
-		padding.PaddingLeft = UDim.new(0, 10)
+		padding.PaddingLeft = UDim.new(0, 8)
 		padding.Parent = button
+
+		button.MouseEnter:Connect(function()
+			button.BackgroundColor3 = colors.buttonHover
+		end)
+
+		button.MouseLeave:Connect(function()
+			button.BackgroundColor3 = colors.button
+		end)
 
 		button.Activated:Connect(function()
 			if egg and egg.Parent then
 				currentEgg = egg
-				selectedEgg.Text = getEggName(egg)
-				status.Text = "Status: Target selected - " .. getEggName(egg)
+				selectedEgg.Text = "🎯 " .. getEggName(egg)
+				status.Text = "Selected: " .. getEggName(egg)
+				status.TextColor3 = colors.success
 			else
-				status.Text = "Status: Egg no longer exists"
+				status.Text = "Egg no longer exists"
+				status.TextColor3 = colors.danger
 				currentEgg = nil
 			end
 		end)
@@ -533,6 +583,15 @@ local function loadControlPanel()
 		findEggs()
 
 		eggInfo.Text = "Eggs found: " .. tostring(#foundEggs)
+		eggCountHome.Text = "Eggs Found: " .. tostring(#foundEggs)
+
+		if #foundEggs > 0 then
+			eggInfo.TextColor3 = colors.success
+			eggCountHome.TextColor3 = colors.success
+		else
+			eggInfo.TextColor3 = colors.danger
+			eggCountHome.TextColor3 = colors.danger
+		end
 
 		for index, egg in ipairs(foundEggs) do
 			if egg and egg.Parent then
@@ -546,17 +605,8 @@ local function loadControlPanel()
 			0,
 			0,
 			0,
-			eggListLayout.AbsoluteContentSize.Y + 14
+			eggListLayout.AbsoluteContentSize.Y + 10
 		)
-
-		if #foundEggs > 0 then
-			status.Text =
-				"Status: Found "
-				.. tostring(#foundEggs)
-				.. " eggs"
-		else
-			status.Text = "Status: No eggs found"
-		end
 	end
 
 	--------------------------------------------------
@@ -565,7 +615,8 @@ local function loadControlPanel()
 
 	local function takeEgg(egg)
 		if not egg or not egg.Parent then
-			status.Text = "Status: Egg no longer exists"
+			status.Text = "Egg no longer exists"
+			status.TextColor3 = colors.danger
 			return false
 		end
 
@@ -573,10 +624,12 @@ local function loadControlPanel()
 		
 		if humanoidRootPart then
 			egg.Parent = player.Backpack or player
-			status.Text = "Status: Took " .. getEggName(egg)
+			status.Text = "Took: " .. getEggName(egg)
+			status.TextColor3 = colors.success
 			return true
 		else
-			status.Text = "Status: Character not found"
+			status.Text = "Character not found"
+			status.TextColor3 = colors.danger
 			return false
 		end
 	end
@@ -587,61 +640,55 @@ local function loadControlPanel()
 
 	local autoTakeButton = Instance.new("TextButton")
 
-	autoTakeButton.Size = UDim2.fromOffset(170, 40)
-	autoTakeButton.Position = UDim2.fromOffset(0, 255)
+	autoTakeButton.Size = UDim2.fromOffset(340, 36)
+	autoTakeButton.Position = UDim2.fromOffset(0, 210)
 	autoTakeButton.BackgroundColor3 = colors.button
-	autoTakeButton.Text = "Auto Take: OFF"
+	autoTakeButton.Text = "🤖 Auto Take: OFF"
 	autoTakeButton.TextColor3 = colors.muted
-	autoTakeButton.TextSize = 14
+	autoTakeButton.TextSize = 12
 	autoTakeButton.Font = Enum.Font.GothamBold
+	autoTakeButton.AutoButtonColor = false
 	autoTakeButton.Parent = eggsPage
 
-	addCorner(autoTakeButton, 7)
+	addCorner(autoTakeButton, 6)
+
+	autoTakeButton.MouseEnter:Connect(function()
+		if autoTakeButton.BackgroundColor3 ~= colors.accent then
+			autoTakeButton.BackgroundColor3 = colors.buttonHover
+		end
+	end)
+
+	autoTakeButton.MouseLeave:Connect(function()
+		if autoTakeButton.BackgroundColor3 ~= colors.accent then
+			autoTakeButton.BackgroundColor3 = colors.button
+		end
+	end)
 
 	autoTakeButton.Activated:Connect(function()
 		autoTake = not autoTake
 
 		if autoTake then
-			autoTakeButton.Text = "Auto Take: ON"
+			autoTakeButton.Text = "🤖 Auto Take: ON"
 			autoTakeButton.BackgroundColor3 = colors.accent
-			autoTakeButton.TextColor3 = colors.text
+			autoTakeButton.TextColor3 = colors.background
 
 			if currentEgg and currentEgg.Parent then
 				takeEgg(currentEgg)
 			else
-				status.Text = "Status: Select an egg first"
+				status.Text = "Select an egg first"
+				status.TextColor3 = colors.danger
 				autoTake = false
-				autoTakeButton.Text = "Auto Take: OFF"
+				autoTakeButton.Text = "🤖 Auto Take: OFF"
 				autoTakeButton.BackgroundColor3 = colors.button
 				autoTakeButton.TextColor3 = colors.muted
 			end
 		else
-			autoTakeButton.Text = "Auto Take: OFF"
+			autoTakeButton.Text = "🤖 Auto Take: OFF"
 			autoTakeButton.BackgroundColor3 = colors.button
 			autoTakeButton.TextColor3 = colors.muted
-			status.Text = "Status: Auto Take disabled"
+			status.Text = "Auto Take disabled"
+			status.TextColor3 = colors.muted
 		end
-	end)
-
-	--------------------------------------------------
-	-- REFRESH BUTTON
-	--------------------------------------------------
-
-	local refreshButton = Instance.new("TextButton")
-
-	refreshButton.Size = UDim2.fromOffset(170, 40)
-	refreshButton.Position = UDim2.fromOffset(185, 255)
-	refreshButton.BackgroundColor3 = colors.button
-	refreshButton.Text = "Refresh Eggs"
-	refreshButton.TextColor3 = colors.text
-	refreshButton.TextSize = 14
-	refreshButton.Font = Enum.Font.GothamBold
-	refreshButton.Parent = eggsPage
-
-	addCorner(refreshButton, 7)
-
-	refreshButton.Activated:Connect(function()
-		refreshEggs()
 	end)
 
 	--------------------------------------------------
@@ -653,35 +700,48 @@ local function loadControlPanel()
 	local settingsTitle = createText(
 		settings,
 		"Settings",
-		24,
-		colors.text,
+		16,
+		colors.accent,
 		Enum.Font.GothamBold
 	)
 
-	settingsTitle.Size = UDim2.new(1, 0, 0, 34)
+	settingsTitle.Size = UDim2.new(1, 0, 0, 28)
 
 	local toggleLabel = createText(
 		settings,
-		"Auto Scan",
-		15,
+		"Auto Scan Every 5s",
+		12,
 		colors.text
 	)
 
-	toggleLabel.Position = UDim2.fromOffset(0, 58)
-	toggleLabel.Size = UDim2.new(1, -100, 0, 30)
+	toggleLabel.Position = UDim2.fromOffset(0, 40)
+	toggleLabel.Size = UDim2.new(1, -70, 0, 28)
 
 	local toggle = Instance.new("TextButton")
 
-	toggle.Size = UDim2.fromOffset(58, 30)
-	toggle.Position = UDim2.new(1, -58, 0, 58)
+	toggle.Size = UDim2.fromOffset(60, 28)
+	toggle.Position = UDim2.new(1, -68, 0, 40)
 	toggle.BackgroundColor3 = colors.accent
 	toggle.Text = "ON"
-	toggle.TextColor3 = colors.text
-	toggle.TextSize = 12
+	toggle.TextColor3 = colors.background
+	toggle.TextSize = 11
 	toggle.Font = Enum.Font.GothamBold
+	toggle.AutoButtonColor = false
 	toggle.Parent = settings
 
-	addCorner(toggle, 15)
+	addCorner(toggle, 6)
+
+	toggle.MouseEnter:Connect(function()
+		toggle.BackgroundColor3 = colors.accentDark
+	end)
+
+	toggle.MouseLeave:Connect(function()
+		if autoScanEnabled then
+			toggle.BackgroundColor3 = colors.accent
+		else
+			toggle.BackgroundColor3 = colors.button
+		end
+	end)
 
 	toggle.Activated:Connect(function()
 		autoScanEnabled = not autoScanEnabled
@@ -695,13 +755,9 @@ local function loadControlPanel()
 
 		toggle.TextColor3 =
 			autoScanEnabled
-			and colors.text
-			or colors.muted
+			and colors.background
+			or colors.text
 	end)
-
-	--------------------------------------------------
-	-- SCAN BUTTON - Removed from home page (auto-scan now)
-	--------------------------------------------------
 
 	--------------------------------------------------
 	-- MINIMIZE
@@ -717,7 +773,7 @@ local function loadControlPanel()
 
 		main.Size =
 			minimized
-			and UDim2.fromOffset(500, 54)
+			and UDim2.fromOffset(500, 50)
 			or UDim2.fromOffset(500, 350)
 	end
 
@@ -734,14 +790,50 @@ local function loadControlPanel()
 	end)
 
 	--------------------------------------------------
-	-- AUTO SCAN LOOP (NEW FEATURE)
+	-- TITLE BAR DRAG FUNCTIONALITY
+	--------------------------------------------------
+
+	local dragging = false
+	local dragStart = nil
+	local startPos = nil
+
+	titleBar.InputBegan:Connect(function(input, gameProcessed)
+		if gameProcessed then return end
+		
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+			dragStart = input.Position
+			startPos = main.Position
+		end
+	end)
+
+	UserInputService.InputChanged:Connect(function(input, gameProcessed)
+		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+			if dragStart then
+				local delta = input.Position - dragStart
+				main.Position = UDim2.fromOffset(
+					startPos.X.Offset + delta.X,
+					startPos.Y.Offset + delta.Y
+				)
+			end
+		end
+	end)
+
+	UserInputService.InputEnded:Connect(function(input, gameProcessed)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = false
+		end
+	end)
+
+	--------------------------------------------------
+	-- AUTO SCAN LOOP
 	--------------------------------------------------
 
 	task.spawn(function()
 		while gui.Parent do
 			if autoScanEnabled then
 				refreshEggs()
-				task.wait(5) -- Scan every 5 seconds
+				task.wait(5)
 			else
 				task.wait(1)
 			end
@@ -752,13 +844,13 @@ local function loadControlPanel()
 	-- INITIALIZE
 	--------------------------------------------------
 
-	showPage("Home")
+	showPage("Eggs")
 	refreshEggs()
 
 end
 
 --------------------------------------------------
--- CREATE FLOATING BUTTON - CENTER & DRAGGABLE (MOBILE + DESKTOP)
+-- CREATE FLOATING BUTTON - CENTER & DRAGGABLE
 --------------------------------------------------
 
 local loaderGui = playerGui:FindFirstChild("ControlPanelLoader")
@@ -776,15 +868,14 @@ local openButton = Instance.new("TextButton")
 
 openButton.Name = "OpenButton"
 openButton.Size = UDim2.fromOffset(50, 50)
--- Positioned at center screen
 openButton.Position = UDim2.fromScale(0.5, 0.5)
 openButton.AnchorPoint = Vector2.new(0.5, 0.5)
-openButton.BackgroundColor3 = Color3.fromRGB(30, 33, 43)
-openButton.Text = "☰"
-openButton.TextColor3 = Color3.fromRGB(240, 242, 248)
-openButton.TextSize = 22
+openButton.BackgroundColor3 = Color3.fromRGB(100, 150, 255)
+openButton.Text = "🥚"
+openButton.TextColor3 = Color3.fromRGB(245, 248, 255)
+openButton.TextSize = 24
 openButton.Font = Enum.Font.GothamBold
-openButton.AutoButtonColor = true
+openButton.AutoButtonColor = false
 openButton.Parent = loaderGui
 
 local buttonCorner = Instance.new("UICorner")
@@ -792,8 +883,9 @@ buttonCorner.CornerRadius = UDim.new(0, 12)
 buttonCorner.Parent = openButton
 
 local buttonStroke = Instance.new("UIStroke")
-buttonStroke.Thickness = 1
-buttonStroke.Transparency = 0.5
+buttonStroke.Color = Color3.fromRGB(100, 150, 255)
+buttonStroke.Thickness = 2
+buttonStroke.Transparency = 0.3
 buttonStroke.Parent = openButton
 
 --------------------------------------------------
@@ -804,7 +896,6 @@ local dragging = false
 local dragStart = nil
 local startPos = nil
 
--- Handle desktop mouse dragging
 openButton.InputBegan:Connect(function(input, gameProcessed)
 	if gameProcessed then return end
 	
@@ -815,7 +906,6 @@ openButton.InputBegan:Connect(function(input, gameProcessed)
 	end
 end)
 
--- Handle mouse/touch movement
 UserInputService.InputChanged:Connect(function(input, gameProcessed)
 	if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
 		if dragStart then
@@ -828,7 +918,6 @@ UserInputService.InputChanged:Connect(function(input, gameProcessed)
 	end
 end)
 
--- Stop dragging
 UserInputService.InputEnded:Connect(function(input, gameProcessed)
 	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 		dragging = false
@@ -836,16 +925,16 @@ UserInputService.InputEnded:Connect(function(input, gameProcessed)
 end)
 
 --------------------------------------------------
--- HOVER EFFECT (DESKTOP ONLY)
+-- HOVER EFFECT
 --------------------------------------------------
 
 openButton.MouseEnter:Connect(function()
-	openButton.BackgroundColor3 = Color3.fromRGB(92, 124, 255)
-	openButton.Size = UDim2.fromOffset(54, 54)
+	openButton.BackgroundColor3 = Color3.fromRGB(120, 170, 255)
+	openButton.Size = UDim2.fromOffset(56, 56)
 end)
 
 openButton.MouseLeave:Connect(function()
-	openButton.BackgroundColor3 = Color3.fromRGB(30, 33, 43)
+	openButton.BackgroundColor3 = Color3.fromRGB(100, 150, 255)
 	openButton.Size = UDim2.fromOffset(50, 50)
 end)
 
