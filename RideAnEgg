@@ -1,4 +1,5 @@
 local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -745,7 +746,7 @@ local function loadControlPanel()
 end
 
 --------------------------------------------------
--- CREATE FLOATING BUTTON
+-- CREATE FLOATING BUTTON - NOW AT CENTER & DRAGGABLE
 --------------------------------------------------
 
 local loaderGui = playerGui:FindFirstChild("ControlPanelLoader")
@@ -763,8 +764,9 @@ local openButton = Instance.new("TextButton")
 
 openButton.Name = "OpenButton"
 openButton.Size = UDim2.fromOffset(50, 50)
-openButton.Position = UDim2.new(0, 15, 0.5, 0)
-openButton.AnchorPoint = Vector2.new(0, 0.5)
+-- CHANGED: Now positioned at center screen instead of left side
+openButton.Position = UDim2.fromScale(0.5, 0.5)
+openButton.AnchorPoint = Vector2.new(0.5, 0.5)
 openButton.BackgroundColor3 = Color3.fromRGB(30, 33, 43)
 openButton.Text = "☰"
 openButton.TextColor3 = Color3.fromRGB(240, 242, 248)
@@ -781,6 +783,40 @@ local buttonStroke = Instance.new("UIStroke")
 buttonStroke.Thickness = 1
 buttonStroke.Transparency = 0.5
 buttonStroke.Parent = openButton
+
+--------------------------------------------------
+-- DRAG FUNCTIONALITY
+--------------------------------------------------
+
+local dragging = false
+local dragStart = nil
+local startPos = nil
+
+openButton.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed then return end
+	
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		dragging = true
+		dragStart = input.Position
+		startPos = openButton.Position
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input, gameProcessed)
+	if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+		local delta = input.Position - dragStart
+		openButton.Position = UDim2.fromOffset(
+			startPos.X.Offset + delta.X,
+			startPos.Y.Offset + delta.Y
+		)
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input, gameProcessed)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		dragging = false
+	end
+end)
 
 --------------------------------------------------
 -- HOVER EFFECT
