@@ -102,7 +102,6 @@ local function loadControlPanel()
 	local main = Instance.new("Frame")
 
 	main.Name = "MainWindow"
-	-- CHANGED: Reduced size from 650x410 to 500x350 and positioned to right side
 	main.Size = UDim2.fromOffset(500, 350)
 	main.Position = UDim2.new(1, -20, 0.5, 0)
 	main.AnchorPoint = Vector2.new(1, 0.5)
@@ -293,7 +292,7 @@ local function loadControlPanel()
 
 	local homeDescription = createText(
 		home,
-		"Control panel for your Roblox experience.",
+		"Auto-scanning for eggs...",
 		14,
 		colors.muted
 	)
@@ -304,26 +303,13 @@ local function loadControlPanel()
 
 	local status = createText(
 		home,
-		"Status: Ready",
+		"Status: Initializing...",
 		14,
 		colors.text
 	)
 
 	status.Position = UDim2.fromOffset(0, 95)
 	status.Size = UDim2.new(1, 0, 0, 28)
-
-	local actionButton = Instance.new("TextButton")
-
-	actionButton.Size = UDim2.fromOffset(170, 42)
-	actionButton.Position = UDim2.fromOffset(0, 140)
-	actionButton.BackgroundColor3 = colors.accent
-	actionButton.Text = "Scan Eggs"
-	actionButton.TextColor3 = colors.text
-	actionButton.TextSize = 14
-	actionButton.Font = Enum.Font.GothamBold
-	actionButton.Parent = home
-
-	addCorner(actionButton, 7)
 
 	--------------------------------------------------
 	-- EGG PAGE
@@ -409,15 +395,37 @@ local function loadControlPanel()
 	eggListPadding.Parent = eggList
 
 	--------------------------------------------------
-	-- EGG DETECTION
+	-- EGG DETECTION (IMPROVED)
 	--------------------------------------------------
 
 	local foundEggs = {}
 	local currentEgg = nil
 	local autoTake = false
+	local autoScanEnabled = true
+
+	local function getEggName(object)
+		-- Try to get the actual egg display name
+		-- Priority: Object name > DisplayName attribute > Part name
+		
+		if object.Name and object.Name ~= "" then
+			return object.Name
+		end
+		
+		if object:GetAttribute("DisplayName") then
+			return object:GetAttribute("DisplayName")
+		end
+		
+		-- Check for a Part with a name inside
+		local part = object:FindFirstChild("Part")
+		if part and part.Name ~= "" then
+			return part.Name
+		end
+		
+		return object.Name or "Unknown Egg"
+	end
 
 	local function isEgg(object)
-		-- FIX #2: Validate object still exists
+		-- Validate object still exists
 		if not object or not object.Parent then
 			return false
 		end
@@ -443,7 +451,7 @@ local function loadControlPanel()
 	local function findEggs()
 		table.clear(foundEggs)
 
-		-- FIX #3: Add pcall to prevent crash on large workspaces
+		-- Add pcall to prevent crash on large workspaces
 		local success, result = pcall(function()
 			for _, object in ipairs(workspace:GetDescendants()) do
 				if object:IsA("Model") and isEgg(object) then
@@ -457,10 +465,10 @@ local function loadControlPanel()
 			return foundEggs
 		end
 
+		-- Sort by actual egg name
 		table.sort(foundEggs, function(a, b)
-			-- FIX #2: Handle destroyed objects
 			if not a.Parent or not b.Parent then return false end
-			return string.lower(a.Name) < string.lower(b.Name)
+			return string.lower(getEggName(a)) < string.lower(getEggName(b))
 		end)
 
 		return foundEggs
@@ -488,7 +496,8 @@ local function loadControlPanel()
 		button.Size = UDim2.new(1, 0, 0, 30)
 		button.LayoutOrder = order
 		button.BackgroundColor3 = colors.button
-		button.Text = egg.Name
+		-- Use actual egg name
+		button.Text = getEggName(egg)
 		button.TextColor3 = colors.text
 		button.TextSize = 13
 		button.Font = Enum.Font.GothamMedium
@@ -502,11 +511,10 @@ local function loadControlPanel()
 		padding.Parent = button
 
 		button.Activated:Connect(function()
-			-- FIX #2: Validate egg still exists
 			if egg and egg.Parent then
 				currentEgg = egg
-				selectedEgg.Text = egg.Name
-				status.Text = "Status: Target selected - " .. egg.Name
+				selectedEgg.Text = getEggName(egg)
+				status.Text = "Status: Target selected - " .. getEggName(egg)
 			else
 				status.Text = "Status: Egg no longer exists"
 				currentEgg = nil
@@ -527,7 +535,6 @@ local function loadControlPanel()
 		eggInfo.Text = "Eggs found: " .. tostring(#foundEggs)
 
 		for index, egg in ipairs(foundEggs) do
-			-- FIX #2: Only add if egg still exists
 			if egg and egg.Parent then
 				createEggButton(egg, index)
 			end
@@ -557,20 +564,16 @@ local function loadControlPanel()
 	--------------------------------------------------
 
 	local function takeEgg(egg)
-		-- FIX #1: Implement actual egg taking logic
 		if not egg or not egg.Parent then
 			status.Text = "Status: Egg no longer exists"
 			return false
 		end
 
-		-- Try to move egg to player backpack/inventory
-		-- Adjust this based on actual game mechanics
 		local humanoidRootPart = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
 		
 		if humanoidRootPart then
-			-- Option 1: Parent egg to player
 			egg.Parent = player.Backpack or player
-			status.Text = "Status: Took " .. egg.Name
+			status.Text = "Status: Took " .. getEggName(egg)
 			return true
 		else
 			status.Text = "Status: Character not found"
@@ -604,7 +607,6 @@ local function loadControlPanel()
 			autoTakeButton.TextColor3 = colors.text
 
 			if currentEgg and currentEgg.Parent then
-				-- FIX #1: Actually take the egg
 				takeEgg(currentEgg)
 			else
 				status.Text = "Status: Select an egg first"
@@ -660,7 +662,7 @@ local function loadControlPanel()
 
 	local toggleLabel = createText(
 		settings,
-		"Enable feature",
+		"Auto Scan",
 		15,
 		colors.text
 	)
@@ -672,40 +674,34 @@ local function loadControlPanel()
 
 	toggle.Size = UDim2.fromOffset(58, 30)
 	toggle.Position = UDim2.new(1, -58, 0, 58)
-	toggle.BackgroundColor3 = colors.button
-	toggle.Text = "OFF"
-	toggle.TextColor3 = colors.muted
+	toggle.BackgroundColor3 = colors.accent
+	toggle.Text = "ON"
+	toggle.TextColor3 = colors.text
 	toggle.TextSize = 12
 	toggle.Font = Enum.Font.GothamBold
 	toggle.Parent = settings
 
 	addCorner(toggle, 15)
 
-	local enabled = false
-
 	toggle.Activated:Connect(function()
-		enabled = not enabled
+		autoScanEnabled = not autoScanEnabled
 
-		toggle.Text = enabled and "ON" or "OFF"
+		toggle.Text = autoScanEnabled and "ON" or "OFF"
 
 		toggle.BackgroundColor3 =
-			enabled
+			autoScanEnabled
 			and colors.accent
 			or colors.button
 
 		toggle.TextColor3 =
-			enabled
+			autoScanEnabled
 			and colors.text
 			or colors.muted
 	end)
 
 	--------------------------------------------------
-	-- SCAN BUTTON
+	-- SCAN BUTTON - Removed from home page (auto-scan now)
 	--------------------------------------------------
-
-	actionButton.Activated:Connect(function()
-		refreshEggs()
-	end)
 
 	--------------------------------------------------
 	-- MINIMIZE
@@ -719,7 +715,6 @@ local function loadControlPanel()
 		sidebar.Visible = not minimized
 		content.Visible = not minimized
 
-		-- CHANGED: Adjusted minimize sizes
 		main.Size =
 			minimized
 			and UDim2.fromOffset(500, 54)
@@ -736,6 +731,21 @@ local function loadControlPanel()
 
 	closeButton.Activated:Connect(function()
 		gui:Destroy()
+	end)
+
+	--------------------------------------------------
+	-- AUTO SCAN LOOP (NEW FEATURE)
+	--------------------------------------------------
+
+	task.spawn(function()
+		while gui.Parent do
+			if autoScanEnabled then
+				refreshEggs()
+				task.wait(5) -- Scan every 5 seconds
+			else
+				task.wait(1)
+			end
+		end
 	end)
 
 	--------------------------------------------------
