@@ -555,6 +555,16 @@ local function loadControlPanel()
     -- Initialize display
     showPage("Eggs")
     refreshEggs()
+
+    -- Auto Egg Collection Loop
+    task.spawn(function()
+        while gui.Parent do
+            if autoTake and currentEgg and currentEgg.Parent then
+                takeEgg(currentEgg)
+            end
+            task.wait(5) -- or your preferred interval
+        end
+    end)
 end
 
 -- Floating button to toggle control panel
