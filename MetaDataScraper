@@ -99,8 +99,9 @@ toggleStroke.Parent = toggleButton
 
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "InspectorWindow"
-mainFrame.Size = UDim2.fromOffset(1000, 650)
-mainFrame.Position = UDim2.new(0.5, -500, 0.5, -325)
+mainFrame.Size = UDim2.fromOffset(360, 450)
+mainFrame.Position = UDim2.new(0.5, -180, 0.5, -225)
+mainFrame.AnchorPoint = Vector2.new(0, 0)
 
 mainFrame.BackgroundColor3 = Color3.fromRGB(24, 24, 24)
 mainFrame.BorderSizePixel = 0
@@ -116,6 +117,73 @@ local mainStroke = Instance.new("UIStroke")
 mainStroke.Thickness = 1
 mainStroke.Color = Color3.fromRGB(70, 70, 70)
 mainStroke.Parent = mainFrame
+
+local mainSizeConstraint = Instance.new("UISizeConstraint")
+mainSizeConstraint.MinSize = Vector2.new(280, 220)
+mainSizeConstraint.MaxSize = Vector2.new(720, 500)
+mainSizeConstraint.Parent = mainFrame
+
+
+------------------------------------------------------------
+-- RESPONSIVE PANEL SIZE
+------------------------------------------------------------
+
+local function updatePanelSize()
+    local camera = workspace.CurrentCamera
+    if not camera then
+        return
+    end
+
+    local viewport = camera.ViewportSize
+    local isMobile = viewport.X <= 600
+
+    local width
+    local height
+
+    if isMobile then
+        -- Keep the inspector as a small overlay on phone screens.
+        width = math.min(380, math.max(280, viewport.X - 20))
+        height = math.min(500, math.max(300, viewport.Y - 120))
+    else
+        width = math.min(720, math.max(420, viewport.X - 40))
+        height = math.min(500, math.max(320, viewport.Y - 80))
+    end
+
+    mainFrame.Size = UDim2.fromOffset(width, height)
+    mainFrame.Position = UDim2.new(0.5, -width / 2, 0.5, -height / 2)
+end
+
+updatePanelSize()
+
+if workspace.CurrentCamera then
+    workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updatePanelSize)
+end
+
+-- Mobile layout adjustments
+local function updateMobileLayout()
+    local camera = workspace.CurrentCamera
+    if not camera then return end
+
+    local mobile = camera.ViewportSize.X <= 600
+    if mobile then
+        searchBox.Size = UDim2.new(0, 100, 0, 30)
+        searchBox.Position = UDim2.new(1, -110, 0, 6)
+        statusLabel.Visible = false
+        treeFrame.Size = UDim2.new(0.5, -15, 1, -105)
+        detailsFrame.Size = UDim2.new(0.5, -15, 1, -105)
+    else
+        searchBox.Size = UDim2.new(0, 200, 0, 32)
+        searchBox.Position = UDim2.new(1, -215, 0, 5)
+        statusLabel.Visible = true
+        treeFrame.Size = UDim2.new(0.52, -15, 1, -105)
+        detailsFrame.Size = UDim2.new(0.48, -15, 1, -105)
+    end
+end
+
+updateMobileLayout()
+if workspace.CurrentCamera then
+    workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updateMobileLayout)
+end
 
 ------------------------------------------------------------
 -- TITLE BAR
@@ -152,8 +220,8 @@ titleLabel.Parent = titleBar
 
 local searchBox = Instance.new("TextBox")
 searchBox.Name = "Search"
-searchBox.Size = UDim2.new(0, 260, 0, 32)
-searchBox.Position = UDim2.new(1, -275, 0, 5)
+searchBox.Size = UDim2.new(0, 200, 0, 32)
+searchBox.Position = UDim2.new(1, -215, 0, 5)
 
 searchBox.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
 searchBox.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -856,13 +924,22 @@ local function showJSON()
     local jsonGui = Instance.new("Frame")
     jsonGui.Name = "JSONWindow"
 
-    jsonGui.Size = UDim2.fromOffset(750, 500)
-    jsonGui.Position = UDim2.new(0.5, -375, 0.5, -250)
+    jsonGui.Size = UDim2.fromOffset(360, 450)
+    jsonGui.Position = UDim2.new(0.5, -180, 0.5, -225)
 
     jsonGui.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
     jsonGui.BorderSizePixel = 0
     jsonGui.ZIndex = 30
     jsonGui.Parent = screenGui
+
+    local jsonCamera = workspace.CurrentCamera
+    if jsonCamera and jsonCamera.ViewportSize.X <= 600 then
+        local v = jsonCamera.ViewportSize
+        local w = math.min(380, math.max(280, v.X - 20))
+        local h = math.min(500, math.max(300, v.Y - 120))
+        jsonGui.Size = UDim2.fromOffset(w, h)
+        jsonGui.Position = UDim2.new(0.5, -w / 2, 0.5, -h / 2)
+    end
 
     local corner = Instance.new("UICorner")
     corner.CornerRadius = UDim.new(0, 8)
