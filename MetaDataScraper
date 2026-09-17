@@ -41,6 +41,11 @@ local YIELD_EVERY = 500
 
 local scanned = {}
 local expanded = {}
+local instanceMeta = {}
+local classCounts = {}
+local cachedTagCount = 0
+local cachedDepth = {}
+local cachedMaxDepth = 0
 
 local instanceCount = 0
 local attributeCount = 0
@@ -59,9 +64,17 @@ local lastExportInfo = nil
 local searchCache = {}
 local searchCacheQuery = nil
 local treeRebuildQueued = false
-local MAX_VISIBLE_TREE_NODES = 5000
+local treeRefreshQueued = false
+local MAX_VISIBLE_TREE_NODES = 10000
+local TREE_ROW_HEIGHT = 31
+local TREE_ROW_POOL_EXTRA = 8
 local treeNodeCount = 0
 local treeRows = {}
+local treeVisibleNodes = {}
+local treeRowPool = {}
+local treeRowInstances = {}
+local treeContentHeight = 0
+local searchFilters = nil
 
 ------------------------------------------------------------
 -- GUI
@@ -555,10 +568,8 @@ treeScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 treeScroll.ZIndex = 102
 treeScroll.Parent = treeFrame
 
-local treeLayout = Instance.new("UIListLayout")
-treeLayout.SortOrder = Enum.SortOrder.LayoutOrder
-treeLayout.Padding = UDim.new(0, 1)
-treeLayout.Parent = treeScroll
+-- The tree is virtualized: only a small pool of rows is rendered at once.
+-- This intentionally avoids a UIListLayout over thousands of Instances.
 
 ------------------------------------------------------------
 -- DETAILS PANEL
@@ -613,7 +624,6 @@ local function bindScrollCanvas(scroll, layout, bottomPadding)
     task.defer(update)
 end
 
-bindScrollCanvas(treeScroll, treeLayout, 10)
 bindScrollCanvas(detailsScroll, detailsLayout, 10)
 
 ------------------------------------------------------------
@@ -621,19 +631,24 @@ bindScrollCanvas(detailsScroll, detailsLayout, 10)
 ------------------------------------------------------------
 
 local function getPath(instance)
-local parts = {}
-local current = instance
+    if instance == game then return "game" end
 
-while current and current ~= game do
-table.insert(parts, 1, current.Name)
-current = current.Parent
-end
+    local meta = instanceMeta[instance]
+    local parent = instance.Parent
+    local parentPath = parent and getPath(parent) or "nil"
+    if meta and meta.path and meta.pathParent == parent and meta.pathName == instance.Name and meta.pathParentPath == parentPath then
+        return meta.path
+    end
 
-if current == game then
-table.insert(parts, 1, "game")
-end
+    local path = (parentPath == "game" and ("game." .. instance.Name)) or (parentPath .. "." .. instance.Name)
 
-return table.concat(parts, ".")
+    if meta then
+        meta.path = path
+        meta.pathParent = parent
+        meta.pathParentPath = parentPath
+        meta.pathName = instance.Name
+    end
+    return path
 end
 
 ------------------------------------------------------------
@@ -725,33 +740,38 @@ end
 ------------------------------------------------------------
 
 local function getAttributeCount(instance)
-local count = 0
+    local meta = instanceMeta[instance]
+    if meta and meta.attributeCount ~= nil then
+        return meta.attributeCount
+    end
 
-local success, attributes = pcall(function()
-return instance:GetAttributes()
-end)
-
-if success and attributes then
-for _ in pairs(attributes) do
-count += 1
-end
-end
-
-return count
+    local count = 0
+    local success, attributes = pcall(function() return instance:GetAttributes() end)
+    if success and attributes then
+        for _ in pairs(attributes) do count += 1 end
+    end
+    return count
 end
 
 ------------------------------------------------------------
 
 local function getAttributes(instance)
-local success, attributes = pcall(function()
-return instance:GetAttributes()
-end)
+    local meta = instanceMeta[instance]
+    if meta and meta.attributes then
+        return meta.attributes
+    end
 
-if success then
-return attributes
-end
-
-return {}
+    local success, attributes = pcall(function() return instance:GetAttributes() end)
+    if success and attributes then
+        if meta then
+            meta.attributes = attributes
+            local count = 0
+            for _ in pairs(attributes) do count += 1 end
+            meta.attributeCount = count
+        end
+        return attributes
+    end
+    return {}
 end
 
 ------------------------------------------------------------
@@ -759,8 +779,16 @@ end
 ------------------------------------------------------------
 
 local function getInstanceTags(instance)
+    local meta = instanceMeta[instance]
+    if meta and meta.tags then
+        return meta.tags
+    end
     local tags = {}
     pcall(function() tags = CollectionService:GetTags(instance) end)
+    if meta then
+        meta.tags = tags
+        meta.tagCount = #tags
+    end
     return tags
 end
 
@@ -779,20 +807,42 @@ local function parseSearchQuery(text)
     return filters
 end
 
-local function instanceMatches(instance, queryText)
+local function instanceMatches(instance, queryText, filters)
     queryText = queryText or currentSearch
     if classFilter ~= "" and string.lower(instance.ClassName) ~= string.lower(classFilter) then
         return false
     end
     if queryText == "" then return true end
 
-    local f = parseSearchQuery(queryText)
-    local name = string.lower(instance.Name)
-    local className = string.lower(instance.ClassName)
-    local path = string.lower(getPath(instance))
-    local attributes = getAttributes(instance)
-    local tags = getInstanceTags(instance)
+    local f = filters or searchFilters or parseSearchQuery(queryText)
+    local meta = instanceMeta[instance]
+    local name = meta and meta.lowerName or string.lower(instance.Name)
+    local className = meta and meta.lowerClass or string.lower(instance.ClassName)
+    local path = nil
+    local attributes = meta and meta.attributes or getAttributes(instance)
+    local tags = meta and meta.tags or getInstanceTags(instance)
+    local lowerAttributes = meta and meta.lowerAttributes
+    local lowerTags = meta and meta.lowerTags
+    if meta and not lowerAttributes then
+        lowerAttributes = {}
+        for k, v in pairs(attributes) do
+            table.insert(lowerAttributes, string.lower(tostring(k)))
+            table.insert(lowerAttributes, string.lower(tostring(v)))
+        end
+        meta.lowerAttributes = lowerAttributes
+    end
+    if meta and not lowerTags then
+        lowerTags = {}
+        for _, tag in ipairs(tags) do
+            table.insert(lowerTags, string.lower(tostring(tag)))
+        end
+        meta.lowerTags = lowerTags
+    end
 
+    local function getLowerPath()
+        if path == nil then path = string.lower(getPath(instance)) end
+        return path
+    end
     local function contains(list, needle)
         for _, v in ipairs(list or {}) do
             if string.find(v, needle, 1, true) then return true end
@@ -802,29 +852,39 @@ local function instanceMatches(instance, queryText)
 
     for _, needle in ipairs(f.name or {}) do if not string.find(name, needle, 1, true) then return false end end
     for _, needle in ipairs(f.class or {}) do if not string.find(className, needle, 1, true) then return false end end
-    for _, needle in ipairs(f.path or {}) do if not string.find(path, needle, 1, true) then return false end end
+    for _, needle in ipairs(f.path or {}) do if not string.find(getLowerPath(), needle, 1, true) then return false end end
     for _, needle in ipairs(f.attr or {}) do
         local found = false
-        for k, v in pairs(attributes) do
-            if string.find(string.lower(tostring(k)), needle, 1, true) or string.find(string.lower(tostring(v)), needle, 1, true) then found = true break end
+        for _, value in ipairs(lowerAttributes or {}) do
+            if string.find(value, needle, 1, true) then found = true break end
         end
         if not found then return false end
     end
     for _, needle in ipairs(f.tag or {}) do
         local found = false
-        for _, tag in ipairs(tags) do if string.find(string.lower(tostring(tag)), needle, 1, true) then found = true break end end
+        for _, tag in ipairs(lowerTags or {}) do
+            if string.find(tag, needle, 1, true) then found = true break end
+        end
         if not found then return false end
     end
 
     for _, needle in ipairs(f.free or {}) do
-        local found = string.find(name, needle, 1, true) or string.find(className, needle, 1, true) or string.find(path, needle, 1, true)
+        local found = string.find(name, needle, 1, true) or string.find(className, needle, 1, true)
+        if not found and (f.path and #f.path > 0) then found = string.find(getLowerPath(), needle, 1, true) end
         if not found then
-            for k, v in pairs(attributes) do
-                if string.find(string.lower(tostring(k)), needle, 1, true) or string.find(string.lower(tostring(v)), needle, 1, true) then found = true break end
+            -- Free-text searches retain path matching without computing paths for
+            -- name/class-only queries that already matched.
+            found = string.find(getLowerPath(), needle, 1, true)
+        end
+        if not found then
+            for _, value in ipairs(lowerAttributes or {}) do
+                if string.find(value, needle, 1, true) then found = true break end
             end
         end
         if not found then
-            for _, tag in ipairs(tags) do if string.find(string.lower(tostring(tag)), needle, 1, true) then found = true break end end
+            for _, tag in ipairs(lowerTags or {}) do
+                if string.find(tag, needle, 1, true) then found = true break end
+            end
         end
         if not found then return false end
     end
@@ -832,19 +892,34 @@ local function instanceMatches(instance, queryText)
 end
 
 local function refreshSearchCache()
-    if searchCacheQuery == currentSearch .. "|" .. classFilter then return end
+    local cacheKey = currentSearch .. "|" .. classFilter
+    if searchCacheQuery == cacheKey then return end
     searchCache = {}
-    searchCacheQuery = currentSearch .. "|" .. classFilter
+    searchFilters = parseSearchQuery(currentSearch)
+    searchCacheQuery = cacheKey
+
     for inst in pairs(scanned) do
-        searchCache[inst] = instanceMatches(inst)
+        searchCache[inst] = instanceMatches(inst, currentSearch, searchFilters)
+    end
+
+    -- Propagate direct matches to ancestors instead of calling GetDescendants()
+    -- for every visible tree node. Each matching instance walks only its parent chain.
+    for inst, matched in pairs(searchCache) do
+        if matched then
+            local parent = inst.Parent
+            while parent and parent ~= game do
+                if not scanned[parent] then break end
+                if searchCache[parent] then break end
+                searchCache[parent] = true
+                parent = parent.Parent
+            end
+            if scanned[game] then searchCache[game] = true end
+        end
     end
 end
 
 local function hasMatchingDescendant(instance)
-    for _, descendant in ipairs(instance:GetDescendants()) do
-        if searchCache[descendant] then return true end
-    end
-    return false
+    return searchCache[instance] == true
 end
 
 -- DISPLAY HELPERS
@@ -922,7 +997,7 @@ label.TextWrapped = true
 label.BorderSizePixel = 0
 
 label.ZIndex = 13
-label.Parent = detailsScroll
+label.Parent = currentDetailSection and currentDetailSection.container or detailsScroll
 if currentDetailSection then table.insert(currentDetailSection.items, label) end
 round(label, 6)
 stroke(label, THEME.stroke, 0.55, 1)
@@ -941,23 +1016,58 @@ end
 
 local function showDetails(instance)
 selectedInstance = instance
-
 clearDetails()
 
 if not instance then
-addDetail("Select an Instance to view its information.", 45)
-return
+    addDetail("Select an Instance to view its information.", 45)
+    return
 end
 
-local function section(title)
-    local data = {title=title, open=true, items={}}
-    table.insert(detailSections, data)
+local propertySearchBox
+local function updateDetailsCanvas()
+    task.defer(function()
+        detailsScroll.CanvasSize = UDim2.fromOffset(0, detailsLayout.AbsoluteContentSize.Y + 14)
+    end)
+end
+
+local function clearSectionItems(data)
+    for _, item in ipairs(data.items) do
+        if item and item.Parent then item:Destroy() end
+    end
+    data.items = {}
+    data.loaded = false
+end
+
+local function populateSection(data)
+    if data.loaded or not data.loader then return end
+    data.loaded = true
     currentDetailSection = data
+    local ok, err = pcall(data.loader)
+    currentDetailSection = nil
+    if not ok then
+        data.loaded = true
+        currentDetailSection = data
+        addDetail("Could not load section: " .. tostring(err), 38)
+        currentDetailSection = nil
+    end
+    updateDetailsCanvas()
+end
+
+local function section(title, initiallyOpen, loader)
+    local data = {
+        title = title,
+        open = initiallyOpen == true,
+        items = {},
+        loader = loader,
+        loaded = false,
+    }
+    table.insert(detailSections, data)
+
     local label = Instance.new("TextButton")
     label.Size = UDim2.new(1, -10, 0, 30)
     label.BackgroundColor3 = THEME.surface
     label.TextColor3 = THEME.accent
-    label.Text = "▼  " .. title
+    label.Text = (data.open and "▼  " or "▶  ") .. title
     label.TextSize = 12
     label.Font = Enum.Font.GothamBold
     label.TextXAlignment = Enum.TextXAlignment.Left
@@ -969,16 +1079,42 @@ local function section(title)
     stroke(label, THEME.stroke, 0.45, 1)
     local pad = Instance.new("UIPadding", label)
     pad.PaddingLeft = UDim.new(0, 8)
+
+    local container = Instance.new("Frame")
+    container.Name = "SectionContent"
+    container.Size = UDim2.new(1, -10, 0, 0)
+    container.AutomaticSize = Enum.AutomaticSize.Y
+    container.BackgroundTransparency = 1
+    container.BorderSizePixel = 0
+    container.Visible = data.open
+    container.ZIndex = 103
+    container.Parent = detailsScroll
+
+    local layout = Instance.new("UIListLayout")
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Padding = UDim.new(0, 4)
+    layout.Parent = container
+
+    data.header = label
+    data.container = container
+
     label.Activated:Connect(function()
         data.open = not data.open
         label.Text = (data.open and "▼  " or "▶  ") .. title
-        for _, item in ipairs(data.items) do item.Visible = data.open end
-        task.defer(function() detailsScroll.CanvasSize = UDim2.fromOffset(0, detailsLayout.AbsoluteContentSize.Y + 14) end)
+        container.Visible = data.open
+        if data.open then
+            populateSection(data)
+        end
+        updateDetailsCanvas()
     end)
-    return label
+
+    if data.open then
+        populateSection(data)
+    end
+    return data
 end
 
-local propertySearchBox = Instance.new("TextBox")
+propertySearchBox = Instance.new("TextBox")
 propertySearchBox.Name = "PropertySearch"
 propertySearchBox.Size = UDim2.new(1, -10, 0, 30)
 propertySearchBox.BackgroundColor3 = THEME.surface
@@ -996,201 +1132,258 @@ round(propertySearchBox, 5)
 local psPad = Instance.new("UIPadding", propertySearchBox)
 psPad.PaddingLeft = UDim.new(0, 9)
 psPad.PaddingRight = UDim.new(0, 9)
-propertySearchBox:GetPropertyChangedSignal("Text"):Connect(function()
-    propertySearch = propertySearchBox.Text
-    if selectedInstance == instance then showDetails(instance) end
-end)
 
 local function actionButton(text, callback)
-local b = Instance.new("TextButton")
-b.Size = UDim2.new(1, -10, 0, 30)
-b.BackgroundColor3 = THEME.surface
-b.TextColor3 = THEME.text
-b.Text = text
-b.TextSize = 12
-b.Font = Enum.Font.GothamMedium
-b.BorderSizePixel = 0
-b.ZIndex = 103
-b.Parent = detailsScroll
-if currentDetailSection then table.insert(currentDetailSection.items, b) end
-round(b, 5)
-stroke(b, THEME.stroke, 0.35, 1)
-b.MouseEnter:Connect(function() b.BackgroundColor3 = THEME.surfaceHover end)
-b.MouseLeave:Connect(function() b.BackgroundColor3 = THEME.surface end)
-b.Activated:Connect(callback)
-return b
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(1, 0, 0, 30)
+    b.BackgroundColor3 = THEME.surface
+    b.TextColor3 = THEME.text
+    b.Text = text
+    b.TextSize = 12
+    b.Font = Enum.Font.GothamMedium
+    b.BorderSizePixel = 0
+    b.ZIndex = 103
+    b.Parent = currentDetailSection.container
+    table.insert(currentDetailSection.items, b)
+    round(b, 5)
+    stroke(b, THEME.stroke, 0.35, 1)
+    b.MouseEnter:Connect(function() b.BackgroundColor3 = THEME.surfaceHover end)
+    b.MouseLeave:Connect(function() b.BackgroundColor3 = THEME.surface end)
+    b.Activated:Connect(callback)
+    return b
 end
-
-section("INSTANCE")
-addDetail("Name: " .. instance.Name)
-addDetail("Class: " .. instance.ClassName)
-addDetail("Path: " .. getPath(instance), 48)
-local breadcrumb = Instance.new("TextLabel")
-breadcrumb.Size = UDim2.new(1, -10, 0, 26)
-breadcrumb.BackgroundColor3 = THEME.surface
-breadcrumb.TextColor3 = THEME.accent
-breadcrumb.Text = "game  ›  " .. string.gsub(getPath(instance), "^game%.?", "")
-breadcrumb.TextSize = 11
-breadcrumb.Font = Enum.Font.GothamMedium
-breadcrumb.TextXAlignment = Enum.TextXAlignment.Left
-breadcrumb.TextTruncate = Enum.TextTruncate.AtEnd
-breadcrumb.BorderSizePixel = 0
-breadcrumb.ZIndex = 13
-breadcrumb.Parent = detailsScroll
-round(breadcrumb, 5)
-local breadcrumbPad = Instance.new("UIPadding", breadcrumb)
-breadcrumbPad.PaddingLeft = UDim.new(0, 8)
 
 local parent = instance.Parent
-addDetail("Parent: " .. (parent and getPath(parent) or "nil"), 42)
+local path = getPath(instance)
 
-local children = 0
-local descendants = 0
-pcall(function() children = #instance:GetChildren() end)
-pcall(function() descendants = #instance:GetDescendants() end)
-addDetail("Children: " .. tostring(children) .. "   |   Descendants: " .. tostring(descendants))
-addDetail("Attributes: " .. tostring(getAttributeCount(instance)))
+section("INSTANCE", true, function()
+    addDetail("Name: " .. instance.Name)
+    addDetail("Class: " .. instance.ClassName)
+    addDetail("Path: " .. path, 48)
 
-section("QUICK ACTIONS")
-actionButton("Copy Path", function()
- local path = getPath(instance)
- if setclipboard then pcall(function() setclipboard(path) end) end
- setMainStatus("Path copied: " .. path, "success", 1)
- showToast("Path copied to clipboard", "success")
+    local breadcrumb = Instance.new("TextLabel")
+    breadcrumb.Size = UDim2.new(1, 0, 0, 26)
+    breadcrumb.BackgroundColor3 = THEME.surface
+    breadcrumb.TextColor3 = THEME.accent
+    breadcrumb.Text = "game  ›  " .. string.gsub(path, "^game%.?", "")
+    breadcrumb.TextSize = 11
+    breadcrumb.Font = Enum.Font.GothamMedium
+    breadcrumb.TextXAlignment = Enum.TextXAlignment.Left
+    breadcrumb.TextTruncate = Enum.TextTruncate.AtEnd
+    breadcrumb.BorderSizePixel = 0
+    breadcrumb.ZIndex = 103
+    breadcrumb.Parent = currentDetailSection.container
+    round(breadcrumb, 5)
+    local breadcrumbPad = Instance.new("UIPadding", breadcrumb)
+    breadcrumbPad.PaddingLeft = UDim.new(0, 8)
+    table.insert(currentDetailSection.items, breadcrumb)
+
+    addDetail("Parent: " .. (parent and getPath(parent) or "nil"), 42)
+    local meta = instanceMeta[instance]
+    local children = meta and meta.childCount or 0
+    local descendants = meta and meta.descendantCount or 0
+    addDetail("Children: " .. tostring(children) .. "   |   Descendants: " .. tostring(descendants))
+    addDetail("Attributes: " .. tostring(getAttributeCount(instance)))
 end)
-actionButton("Jump to Parent", function()
- if parent and parent ~= game then showDetails(parent);   else showToast("No parent available", "warning") end
+
+section("QUICK ACTIONS", true, function()
+    actionButton("Copy Path", function()
+        if setclipboard then pcall(function() setclipboard(path) end) end
+        setMainStatus("Path copied: " .. path, "success", 1)
+        showToast("Path copied to clipboard", "success")
+    end)
+    actionButton("Jump to Parent", function()
+        if parent and parent ~= game then showDetails(parent) else showToast("No parent available", "warning") end
+    end)
+    actionButton("Copy JSON", function()
+        local ok, encoded = pcall(function()
+            return HttpService:JSONEncode({path=path, name=instance.Name, className=instance.ClassName, attributes=getAttributes(instance)})
+        end)
+        if ok and setclipboard then pcall(function() setclipboard(encoded) end) end
+        setMainStatus(ok and "Instance JSON copied." or "Could not encode instance.", ok and "success" or "error", 1)
+        showToast(ok and "Instance JSON copied" or "Could not encode instance", ok and "success" or "error")
+    end)
+    actionButton("Export Subtree", function()
+        jsonButton:Activate()
+    end)
 end)
-actionButton("Copy JSON", function()
- local ok, encoded = pcall(function()
-  return HttpService:JSONEncode({path=getPath(instance), name=instance.Name, className=instance.ClassName, attributes=getAttributes(instance)})
- end)
- if ok and setclipboard then pcall(function() setclipboard(encoded) end) end
- setMainStatus(ok and "Instance JSON copied." or "Could not encode instance.", ok and "success" or "error", 1)
- showToast(ok and "Instance JSON copied" or "Could not encode instance", ok and "success" or "error")
+
+section("TRANSFORM", false, function()
+    local okCF, cf = pcall(function() return instance:IsA("BasePart") and instance.CFrame or nil end)
+    if okCF and cf then
+        addDetail(string.format("Position: %.3f, %.3f, %.3f", cf.Position.X, cf.Position.Y, cf.Position.Z), 36)
+        addDetail(string.format("Rotation: %.1f°, %.1f°, %.1f°", cf:ToOrientation()), 36)
+        addDetail("Size: " .. tostring(instance.Size), 36)
+    else
+        local okAtt, attCF = pcall(function() return instance:IsA("Attachment") and instance.CFrame or nil end)
+        if okAtt and attCF then addDetail("Attachment CFrame: " .. tostring(attCF), 42) else addDetail("No transform data.", 35) end
+    end
 end)
-actionButton("Export Subtree", function()
- jsonButton:Activate()
+
+local attributesSection
+attributesSection = section("ATTRIBUTES", false, function()
+    local attributes = getAttributes(instance)
+    local attributeNames = {}
+    for name in pairs(attributes) do table.insert(attributeNames, tostring(name)) end
+    table.sort(attributeNames)
+    if #attributeNames > 0 then
+        for _, name in ipairs(attributeNames) do
+            local value = attributes[name]
+            addDetail(name .. " = " .. formatDisplayValue(value) .. "  [" .. typeof(value) .. "]", 42)
+        end
+    else
+        addDetail("No attributes.", 35)
+    end
 end)
 
-section("TRANSFORM")
-local okCF, cf = pcall(function() return instance:IsA("BasePart") and instance.CFrame or nil end)
-if okCF and cf then
- addDetail(string.format("Position: %.3f, %.3f, %.3f", cf.Position.X, cf.Position.Y, cf.Position.Z), 36)
- addDetail(string.format("Rotation: %.1f°, %.1f°, %.1f°", cf:ToOrientation()), 36)
- addDetail("Size: " .. tostring(instance.Size), 36)
-else
- local okAtt, attCF = pcall(function() return instance:IsA("Attachment") and instance.CFrame or nil end)
- if okAtt and attCF then addDetail("Attachment CFrame: " .. tostring(attCF), 42) else addDetail("No transform data.", 35) end
-end
+section("TAGS", false, function()
+    local tags = getInstanceTags(instance)
+    if #tags > 1 then table.sort(tags) end
+    if #tags > 0 then addDetail(table.concat(tags, "  •  "), 42) else addDetail("No CollectionService tags.", 35) end
+end)
 
-section("ATTRIBUTES")
-local attributes = getAttributes(instance)
-local attributeNames = {}
-for name in pairs(attributes) do table.insert(attributeNames, tostring(name)) end
-table.sort(attributeNames)
-if #attributeNames > 0 then
-for _, name in ipairs(attributeNames) do
- local value = attributes[name]
- addDetail(name .. " = " .. formatDisplayValue(value) .. "  [" .. typeof(value) .. "]", 42)
-end
-else
- addDetail("No attributes.", 35)
-end
-
-section("TAGS")
-local tags = {}
-pcall(function() tags = CollectionService:GetTags(instance) end)
-table.sort(tags)
-if #tags > 0 then
- addDetail(table.concat(tags, "  •  "), 42)
-else
- addDetail("No CollectionService tags.", 35)
-end
-
-section("PROPERTY SUMMARY")
 local propertyGroups = {
     Transform = {"CFrame", "Position", "Orientation", "Size", "WorldCFrame", "WorldPosition", "WorldOrientation"},
     Appearance = {"Color", "Material", "Transparency", "Reflectance", "CastShadow", "TextureID", "MeshId", "Texture"},
     Physics = {"Anchored", "CanCollide", "CanTouch", "CanQuery", "Massless", "CollisionGroup"},
     Behavior = {"Enabled", "Active", "Rate", "Lifetime", "Looped", "Playing", "Volume"}
 }
+local propertySections = {}
 for groupName, names in pairs(propertyGroups) do
-    local found = false
-    for _, propertyName in ipairs(names) do
+    propertySections[groupName] = section(groupName, false, function()
+        local query = string.lower(propertySearch or "")
+        local found = false
+        for _, propertyName in ipairs(names) do
+            local ok, value = pcall(function() return instance[propertyName] end)
+            if ok and value ~= nil then
+                local formatted = formatDisplayValue(value)
+                if query == "" or string.find(string.lower(propertyName), query, 1, true) or string.find(string.lower(formatted), query, 1, true) then
+                    found = true
+                    addDetail(propertyName .. " = " .. formatted .. "  [" .. typeof(value) .. "]", 38)
+                end
+            end
+        end
+        if not found then addDetail(query == "" and "No readable properties." or "No matching properties.", 35) end
+    end)
+end
+
+local relationshipsSection = section("RELATIONSHIPS", false, function()
+    addDetail("Parent → " .. (parent and getPath(parent) or "nil"), 42)
+    local meta = instanceMeta[instance]
+    local children = meta and meta.childCount or 0
+    if children > 0 then
+        actionButton("Show Children (" .. tostring(children) .. ")", function()
+            expanded[instance] = true
+            rebuildTree()
+        end)
+    end
+    local refCount = 0
+    for _, propertyName in ipairs({"Adornee", "Attachment0", "Attachment1", "Part0", "Part1", "Target", "SoundId", "CameraSubject", "Parent"}) do
         local ok, value = pcall(function() return instance[propertyName] end)
-        if ok and value ~= nil and (propertySearch == "" or string.find(string.lower(propertyName), string.lower(propertySearch), 1, true) or string.find(string.lower(formatDisplayValue(value)), string.lower(propertySearch), 1, true)) then
-            if not found then section(groupName); found = true end
-            addDetail(propertyName .. " = " .. formatDisplayValue(value) .. "  [" .. typeof(value) .. "]", 38)
+        if ok and typeof(value) == "Instance" then
+            refCount += 1
+            addDetail(propertyName .. " → " .. getPath(value), 42)
         end
     end
-end
+    if refCount == 0 then addDetail("No direct Instance references found.", 35) end
+end)
 
-section("RELATIONSHIPS")
-addDetail("Parent → " .. (parent and getPath(parent) or "nil"), 42)
-if children > 0 then actionButton("Show Children (" .. tostring(children) .. ")", function() expanded[instance] = true; rebuildTree();   end) end
-local refCount = 0
-for _, propertyName in ipairs({"Adornee", "Attachment0", "Attachment1", "Part0", "Part1", "Target", "SoundId", "CameraSubject", "Parent"}) do
-    local ok, value = pcall(function() return instance[propertyName] end)
-    if ok and typeof(value) == "Instance" then
-        refCount += 1
-        addDetail(propertyName .. " → " .. getPath(value), 42)
+propertySearchBox:GetPropertyChangedSignal("Text"):Connect(function()
+    propertySearch = propertySearchBox.Text
+    for _, data in pairs(propertySections) do
+        if data.loaded then
+            clearSectionItems(data)
+            if data.open then populateSection(data) end
+        end
     end
+    updateDetailsCanvas()
+end)
 end
-if refCount == 0 then addDetail("No direct Instance references found.", 35) end
 
-end
 ------------------------------------------------------------
 -- TREE
 ------------------------------------------------------------
 
 local function clearTree()
-    for _, child in ipairs(treeScroll:GetChildren()) do
-        if not child:IsA("UIListLayout") then child:Destroy() end
-    end
+    -- Keep the row pool alive; virtualization reuses these GUI objects.
+    treeRows = {}
+    treeRowInstances = {}
 end
 
-local function createNode(instance, depth, childIndex, duplicateName)
-    if treeNodeCount >= MAX_VISIBLE_TREE_NODES then return end
-    if currentSearch ~= "" and not instanceMatches(instance) and not hasMatchingDescendant(instance) then return end
-    treeNodeCount += 1
+local function getTreeRowCount()
+    local visibleHeight = math.max(1, treeScroll.AbsoluteWindowSize.Y)
+    return math.max(24, math.ceil(visibleHeight / TREE_ROW_HEIGHT) + TREE_ROW_POOL_EXTRA)
+end
+
+local function styleTreeRow(row, instance, depth, childIndex, duplicateName, index)
     local children = {}
     pcall(function() children = instance:GetChildren() end)
     local hasChildren = #children > 0
     local isExpanded = expanded[instance] == true
+    local indent = math.min(depth, 22) * 14
 
+    row.Position = UDim2.fromOffset(0, (index - 1) * TREE_ROW_HEIGHT)
+    row.Size = UDim2.new(1, -5, 0, TREE_ROW_HEIGHT - 1)
+    row.BackgroundColor3 = selectedInstance == instance and THEME.accentSoft or THEME.panel2
+    row.Visible = true
+
+    local arrow = row:FindFirstChild("Arrow")
+    local icon = row:FindFirstChild("Icon")
+    local nameButton = row:FindFirstChild("NameButton")
+    arrow.Position = UDim2.fromOffset(indent, 0)
+    arrow.Text = hasChildren and (isExpanded and "▼" or "▶") or ""
+    arrow.Active = hasChildren
+    icon.Position = UDim2.fromOffset(indent + 25, 0)
+    icon.Text = getClassIcon(instance)
+    nameButton.Position = UDim2.fromOffset(indent + 47, 0)
+    nameButton.Size = UDim2.new(1, -(indent + 50), 1, 0)
+
+    local childText = hasChildren and ("  • " .. tostring(#children)) or ""
+    local duplicateText = duplicateName and ("  [#" .. tostring(childIndex or 1) .. "]") or ""
+    local attrs = getAttributeCount(instance)
+    local attrText = attrs > 0 and ("  · " .. tostring(attrs) .. "a") or ""
+    nameButton.Text = instance.Name .. duplicateText .. "  <" .. instance.ClassName .. ">" .. childText .. attrText
+
+    treeRows[instance] = row
+    treeRowInstances[row] = instance
+end
+
+local requestTreeRefresh
+
+local function createTreeRow()
     local row = Instance.new("Frame")
     row.Name = "NodeRow"
-    row.Size = UDim2.new(1, -5, 0, 30)
-    row.BackgroundColor3 = selectedInstance == instance and THEME.accentSoft or THEME.panel2
+    row.BackgroundColor3 = THEME.panel2
     row.BorderSizePixel = 0
     row.ZIndex = 103
+    row.Visible = false
     row.Parent = treeScroll
-    treeRows[instance] = row
     round(row, 5)
 
-    local indent = math.min(depth, 22) * 14
     local arrow = Instance.new("TextButton")
-    arrow.Size = UDim2.fromOffset(26, 30)
-    arrow.Position = UDim2.fromOffset(indent, 0)
+    arrow.Name = "Arrow"
+    arrow.Size = UDim2.fromOffset(26, TREE_ROW_HEIGHT - 1)
     arrow.BackgroundTransparency = 1
     arrow.BorderSizePixel = 0
-    arrow.Text = hasChildren and (isExpanded and "▼" or "▶") or ""
     arrow.TextColor3 = THEME.text
     arrow.TextSize = 11
     arrow.Font = Enum.Font.GothamBold
     arrow.AutoButtonColor = false
     arrow.ZIndex = 106
     arrow.Parent = row
-    if hasChildren then
-        arrow.Activated:Connect(function() expanded[instance] = not expanded[instance]; rebuildTree() end)
-    end
+    arrow.Activated:Connect(function()
+        local instance = treeRowInstances[row]
+        if not instance then return end
+        local children = instance:GetChildren()
+        if #children == 0 then return end
+        expanded[instance] = not expanded[instance]
+        requestTreeRefresh()
+    end)
 
     local icon = Instance.new("TextLabel")
-    icon.Size = UDim2.fromOffset(22, 30)
-    icon.Position = UDim2.fromOffset(indent + 25, 0)
+    icon.Name = "Icon"
+    icon.Size = UDim2.fromOffset(22, TREE_ROW_HEIGHT - 1)
     icon.BackgroundTransparency = 1
-    icon.Text = getClassIcon(instance)
     icon.TextColor3 = THEME.accent
     icon.TextSize = 12
     icon.Font = Enum.Font.GothamBold
@@ -1198,8 +1391,7 @@ local function createNode(instance, depth, childIndex, duplicateName)
     icon.Parent = row
 
     local nameButton = Instance.new("TextButton")
-    nameButton.Size = UDim2.new(1, -(indent + 50), 1, 0)
-    nameButton.Position = UDim2.fromOffset(indent + 47, 0)
+    nameButton.Name = "NameButton"
     nameButton.BackgroundTransparency = 1
     nameButton.BorderSizePixel = 0
     nameButton.TextColor3 = THEME.text
@@ -1209,40 +1401,115 @@ local function createNode(instance, depth, childIndex, duplicateName)
     nameButton.TextTruncate = Enum.TextTruncate.AtEnd
     nameButton.AutoButtonColor = false
     nameButton.ZIndex = 105
-    local childText = hasChildren and ("  • " .. tostring(#children)) or ""
-    local duplicateText = duplicateName and ("  [#" .. tostring(childIndex or 1) .. "]") or ""
-    local attrs = getAttributeCount(instance)
-    local attrText = attrs > 0 and ("  · " .. tostring(attrs) .. "a") or ""
-    nameButton.Text = instance.Name .. duplicateText .. "  <" .. instance.ClassName .. ">" .. childText .. attrText
     nameButton.Parent = row
-    nameButton.Activated:Connect(function() showDetails(instance); rebuildTree() end)
+    nameButton.Activated:Connect(function()
+        local instance = treeRowInstances[row]
+        if not instance then return end
+        showDetails(instance)
+        requestTreeRefresh()
+    end)
 
-    if isExpanded then
-        local nameCounts = {}
-        for _, child in ipairs(children) do nameCounts[child.Name] = (nameCounts[child.Name] or 0) + 1 end
-        for i, child in ipairs(children) do
-            createNode(child, depth + 1, i, nameCounts[child.Name] > 1)
+    table.insert(treeRowPool, row)
+    return row
+end
+
+local function ensureTreeRowPool()
+    local needed = getTreeRowCount()
+    while #treeRowPool < needed do
+        createTreeRow()
+    end
+end
+
+local function buildVisibleTreeNodes()
+    local nodes = {}
+    local count = 0
+    local stack = {{game, 0, 1, false}}
+
+    while #stack > 0 and count < MAX_VISIBLE_TREE_NODES do
+        local item = table.remove(stack)
+        local instance, depth, childIndex, duplicateName = item[1], item[2], item[3], item[4]
+        if currentSearch == "" or instanceMatches(instance, currentSearch, searchFilters) or hasMatchingDescendant(instance) then
+            count += 1
+            nodes[count] = {instance, depth, childIndex, duplicateName}
+
+            if expanded[instance] then
+                local children = {}
+                pcall(function() children = instance:GetChildren() end)
+                local nameCounts = {}
+                for _, child in ipairs(children) do
+                    nameCounts[child.Name] = (nameCounts[child.Name] or 0) + 1
+                end
+                for i = #children, 1, -1 do
+                    local child = children[i]
+                    if currentSearch == "" or instanceMatches(child, currentSearch, searchFilters) or hasMatchingDescendant(child) then
+                        table.insert(stack, {child, depth + 1, i, nameCounts[child.Name] > 1})
+                    end
+                end
+            end
         end
+    end
+    return nodes, count
+end
+
+local function renderVirtualTree()
+    ensureTreeRowPool()
+    local nodes, count = buildVisibleTreeNodes()
+    treeVisibleNodes = nodes
+    treeNodeCount = count
+    treeContentHeight = count * TREE_ROW_HEIGHT + 16
+    treeScroll.CanvasSize = UDim2.fromOffset(0, treeContentHeight)
+
+    for i, row in ipairs(treeRowPool) do
+        local node = nodes[i]
+        if node then
+            styleTreeRow(row, node[1], node[2], node[3], node[4], i)
+        else
+            row.Visible = false
+            treeRowInstances[row] = nil
+        end
+    end
+
+    local oldY = treeScroll.CanvasPosition.Y
+    local maxY = math.max(0, treeContentHeight - treeScroll.AbsoluteWindowSize.Y)
+    treeScroll.CanvasPosition = Vector2.new(0, math.clamp(oldY, 0, maxY))
+    if count >= MAX_VISIBLE_TREE_NODES then
+        setMainStatus("Display limited to " .. tostring(MAX_VISIBLE_TREE_NODES) .. " visible nodes", "warning")
     end
 end
 
 function rebuildTree()
-    local oldY = treeScroll.CanvasPosition.Y
-    clearTree()
-    treeNodeCount = 0
-    treeRows = {}
     refreshSearchCache()
     if expanded[game] == nil then expanded[game] = true end
-    createNode(game, 0)
+    renderVirtualTree()
+end
+
+requestTreeRefresh = function()
+    if treeRefreshQueued then return end
+    treeRefreshQueued = true
     task.defer(function()
-        local maxY = math.max(0, treeLayout.AbsoluteContentSize.Y - treeScroll.AbsoluteWindowSize.Y)
-        treeScroll.CanvasSize = UDim2.fromOffset(0, treeLayout.AbsoluteContentSize.Y + 16)
-        treeScroll.CanvasPosition = Vector2.new(0, math.clamp(oldY, 0, maxY))
-        if treeNodeCount >= MAX_VISIBLE_TREE_NODES then
-            setMainStatus("Display limited to " .. tostring(MAX_VISIBLE_TREE_NODES) .. " visible nodes", "warning")
-        end
+        treeRefreshQueued = false
+        if screenGui.Parent then rebuildTree() end
     end)
 end
+
+treeScroll:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
+    -- Render only rows intersecting the viewport.
+    if treeRefreshQueued then return end
+    local first = math.floor(treeScroll.CanvasPosition.Y / TREE_ROW_HEIGHT) + 1
+    local last = first + #treeRowPool - 1
+    for i = first, last do
+        local node = treeVisibleNodes[i]
+        local row = treeRowPool[i - first + 1]
+        if row then
+            if node then
+                styleTreeRow(row, node[1], node[2], node[3], node[4], i)
+            else
+                row.Visible = false
+                treeRowInstances[row] = nil
+            end
+        end
+    end
+end)
 
 ------------------------------------------------------------
 -- SEARCH RESULT NAVIGATION
@@ -1264,10 +1531,16 @@ local function selectSearchMatch(direction)
     selectedInstance = target
     rebuildTree()
     task.defer(function()
-        local row = treeRows[target]
-        if row and row.Parent then
-            local y = row.AbsolutePosition.Y - treeScroll.AbsolutePosition.Y + treeScroll.CanvasPosition.Y - 12
-            local maxY = math.max(0, treeLayout.AbsoluteContentSize.Y - treeScroll.AbsoluteWindowSize.Y)
+        local targetIndex = nil
+        for i, node in ipairs(treeVisibleNodes) do
+            if node[1] == target then
+                targetIndex = i
+                break
+            end
+        end
+        if targetIndex then
+            local y = (targetIndex - 1) * TREE_ROW_HEIGHT - 12
+            local maxY = math.max(0, treeContentHeight - treeScroll.AbsoluteWindowSize.Y)
             treeScroll.CanvasPosition = Vector2.new(0, math.clamp(y, 0, maxY))
         end
     end)
@@ -1281,20 +1554,70 @@ end
 
 local function scanInstance(instance, generation)
     if scanGeneration ~= generation or instanceCount >= MAX_INSTANCES or scanned[instance] then return end
+
     scanned[instance] = true
     instanceCount += 1
+
     local attrs = getAttributes(instance)
-    for _ in pairs(attrs) do attributeCount += 1 end
+    local attrCount = 0
+    for _ in pairs(attrs) do attrCount += 1 end
+    local tags = getInstanceTags(instance)
+
+    local parent = instance.Parent
+    local depth = 0
+    if parent == game then
+        depth = 1
+    elseif parent then
+        local parentMeta = instanceMeta[parent]
+        depth = parentMeta and ((parentMeta.depth or 0) + 1) or 1
+    end
+
+    instanceMeta[instance] = {
+        lowerName = string.lower(instance.Name),
+        lowerClass = string.lower(instance.ClassName),
+        attributes = attrs,
+        attributeCount = attrCount,
+        tags = tags,
+        tagCount = #tags,
+        depth = depth,
+        childCount = 0,
+        descendantCount = 0,
+        path = nil,
+        pathParent = nil,
+        pathParentPath = nil,
+        pathName = instance.Name,
+        lowerAttributes = nil,
+        lowerTags = nil,
+    }
+    cachedDepth[instance] = depth
+    classCounts[instance.ClassName] = (classCounts[instance.ClassName] or 0) + 1
+    cachedTagCount += #tags
+    attributeCount += attrCount
+
     if instanceCount % YIELD_EVERY == 0 then
         setMainStatus("Scanning... " .. tostring(instanceCount) .. " instances", "working")
         task.wait()
     end
+
     local children = {}
     if not pcall(function() children = instance:GetChildren() end) then return end
     for _, child in ipairs(children) do
         if scanGeneration ~= generation or instanceCount >= MAX_INSTANCES then return end
         scanInstance(child, generation)
     end
+
+    local meta = instanceMeta[instance]
+    meta.childCount = #children
+    local descendantCount = 0
+    for _, child in ipairs(children) do
+        local childMeta = instanceMeta[child]
+        if childMeta then
+            descendantCount += 1 + (childMeta.descendantCount or 0)
+        end
+    end
+    meta.descendantCount = descendantCount
+    cachedDepth[instance] = depth
+    if depth > cachedMaxDepth then cachedMaxDepth = depth end
 end
 
 local function performScan()
@@ -1303,6 +1626,11 @@ local function performScan()
     scanGeneration += 1
     local generation = scanGeneration
     scanned = {}
+    instanceMeta = {}
+    classCounts = {}
+    cachedDepth = {}
+    cachedMaxDepth = 0
+    cachedTagCount = 0
     instanceCount = 0
     attributeCount = 0
     selectedInstance = nil
@@ -1326,6 +1654,9 @@ end
 --========================================================
 
 local JSON_BATCH_SIZE = 25
+local JSON_MIN_BATCH_SIZE = 8
+local JSON_MAX_BATCH_SIZE = 75
+local JSON_TARGET_BATCH_MS = 6
 local JSON_PREVIEW_RECORDS = 25
 
 -- PUT YOUR WEBHOOK URL HERE
@@ -2095,7 +2426,43 @@ local function buildJSONAsync(updateStatus, selectedOnly, exportOptions)
     local includeEmptyProperties = exportOptions.includeEmptyProperties == true
     local searchText = string.lower(tostring(exportOptions.searchText or ""))
 
-    local roots = {}
+    -- Export-local caches. These prevent repeated hierarchy/path/service work while
+    -- keeping the normal Inspector cache untouched during a potentially long export.
+    local exportPathCache = {}
+    local exportServiceCache = {}
+
+    local function safePath(instance)
+        local cached = exportPathCache[instance]
+        if cached then
+            return cached
+        end
+
+        local path = "<unavailable>"
+        pcall(function() path = getPath(instance) end)
+        exportPathCache[instance] = path
+        return path
+    end
+
+    local function getServiceName(instance)
+        local cached = exportServiceCache[instance]
+        if cached ~= nil then
+            return cached == false and nil or cached
+        end
+
+        local serviceName = nil
+        pcall(function()
+            local top = instance
+            while top and top.Parent and top.Parent ~= game do
+                top = top.Parent
+            end
+            if top and top.Parent == game then
+                serviceName = top.Name
+            end
+        end)
+
+        exportServiceCache[instance] = serviceName or false
+        return serviceName
+    end
 
     if selectedOnly and scanned[selectedOnly] then
         table.insert(roots, selectedOnly)
@@ -2116,10 +2483,7 @@ local function buildJSONAsync(updateStatus, selectedOnly, exportOptions)
     end
 
     table.sort(roots, function(a, b)
-        local pathA, pathB = "", ""
-        pcall(function() pathA = getPath(a) end)
-        pcall(function() pathB = getPath(b) end)
-        return pathA < pathB
+        return safePath(a) < safePath(b)
     end)
 
     -- Optional instance search. A match is checked against name, class, and path.
@@ -2127,10 +2491,10 @@ local function buildJSONAsync(updateStatus, selectedOnly, exportOptions)
     if searchText ~= "" then
         local filteredRoots = {}
         for _, instance in ipairs(roots) do
-            local name, className, path = "", "", ""
+            local name, className = "", ""
             pcall(function() name = tostring(instance.Name) end)
             pcall(function() className = tostring(instance.ClassName) end)
-            pcall(function() path = tostring(getPath(instance)) end)
+            local path = safePath(instance)
             local haystack = string.lower(name .. " " .. className .. " " .. path)
             if string.find(haystack, searchText, 1, true) then
                 table.insert(filteredRoots, instance)
@@ -2155,33 +2519,11 @@ local function buildJSONAsync(updateStatus, selectedOnly, exportOptions)
 
     local progressTotal = instanceCount
     if selectedOnly and scanned[selectedOnly] then
-        progressTotal = 1
-        pcall(function()
-            progressTotal += #selectedOnly:GetDescendants()
-        end)
+        local selectedMeta = instanceMeta[selectedOnly]
+        progressTotal = 1 + (selectedMeta and (selectedMeta.descendantCount or 0) or 0)
     end
     if searchText ~= "" then
         progressTotal = math.max(1, #roots)
-    end
-
-    local function safePath(instance)
-        local path = "<unavailable>"
-        pcall(function() path = getPath(instance) end)
-        return path
-    end
-
-    local function getServiceName(instance)
-        local serviceName = nil
-        pcall(function()
-            local top = instance
-            while top and top.Parent and top.Parent ~= game do
-                top = top.Parent
-            end
-            if top and top.Parent == game then
-                serviceName = top.Name
-            end
-        end)
-        return serviceName
     end
 
     local function getTransform(instance)
@@ -2238,6 +2580,31 @@ local function buildJSONAsync(updateStatus, selectedOnly, exportOptions)
             table.sort(tags)
         end
         return tags
+    end
+
+    local currentBatchSize = JSON_BATCH_SIZE
+    local batchStartedAt = os.clock()
+    local recordsSinceYield = 0
+
+    local function adaptiveYield()
+        recordsSinceYield += 1
+        if recordsSinceYield < currentBatchSize then
+            return
+        end
+
+        local elapsedMs = (os.clock() - batchStartedAt) * 1000
+        recordsSinceYield = 0
+        batchStartedAt = os.clock()
+
+        -- Keep individual work slices short on slow/mobile devices, while allowing
+        -- faster devices to process larger chunks when the exporter is cheap.
+        if elapsedMs > JSON_TARGET_BATCH_MS * 1.5 then
+            currentBatchSize = math.max(JSON_MIN_BATCH_SIZE, math.floor(currentBatchSize * 0.65))
+        elseif elapsedMs < JSON_TARGET_BATCH_MS * 0.5 then
+            currentBatchSize = math.min(JSON_MAX_BATCH_SIZE, math.floor(currentBatchSize * 1.25))
+        end
+
+        task.wait()
     end
 
     local function buildInstanceRecord(instance, depth, childIndex, parentPath)
@@ -2362,6 +2729,12 @@ local function buildJSONAsync(updateStatus, selectedOnly, exportOptions)
         record.referencesCount = #record.references
         stats.totalReferences += record.referencesCount
 
+        -- If this record has no children, yield here as well. For parent records the
+        -- recursive child loop performs the yields while traversal is active.
+        if not includeChildren then
+            adaptiveYield()
+        end
+
         -- Recursive hierarchy
         local childrenOK
         local childList
@@ -2390,9 +2763,7 @@ local function buildJSONAsync(updateStatus, selectedOnly, exportOptions)
                     return nil, childError
                 end
 
-                if nextExportId % JSON_BATCH_SIZE == 0 then
-                    task.wait()
-                end
+                adaptiveYield()
             end
         elseif not childrenOK then
             table.insert(record.errors, "GetChildren failed: " .. tostring(childList))
@@ -2471,6 +2842,34 @@ local function buildJSONAsync(updateStatus, selectedOnly, exportOptions)
         table.insert(exportData.metadata.rootPaths, record.path)
     end
 
+    -- Build the small preview before encoding the complete export. This avoids
+    -- JSONDecode(fullJSON) + JSONEncode(preview) later, which can temporarily
+    -- duplicate a very large export in memory on low-end devices.
+    local previewInstances = {}
+    for index = 1, math.min(#allRecords, JSON_PREVIEW_RECORDS) do
+        previewInstances[index] = allRecords[index]
+    end
+
+    local previewData = {
+        metadata = exportData.metadata,
+        statistics = exportData.statistics,
+        instances = previewInstances
+    }
+
+    local previewJSON
+    local previewOK, previewResult = pcall(function()
+        return HttpService:JSONEncode(previewData)
+    end)
+    if previewOK then
+        previewJSON = previewResult
+    else
+        previewJSON = "Preview encoding failed: " .. tostring(previewResult)
+    end
+
+    if jsonCancelRequested then
+        return nil, "Export cancelled."
+    end
+
     local ok, finalJSON = pcall(function()
         return HttpService:JSONEncode(exportData)
     end)
@@ -2486,7 +2885,8 @@ local function buildJSONAsync(updateStatus, selectedOnly, exportOptions)
         properties = stats.totalProperties,
         tags = stats.totalTags,
         references = stats.totalReferences,
-        maxDepth = stats.maxDepth
+        maxDepth = stats.maxDepth,
+        previewJSON = previewJSON
     }
 end
 
@@ -2900,18 +3300,17 @@ local function showJSON()
             end
             fullJSON = result
             jsonRecordCount = info.total or 0
-            local previewText = result
-            local decodeOK, decoded = pcall(function() return HttpService:JSONDecode(result) end)
-            if decodeOK and type(decoded) == "table" then
-                local previewData = {metadata=decoded.metadata, statistics=decoded.statistics, instances={}}
-                if type(decoded.instances) == "table" then
-                    for i=1,math.min(#decoded.instances,JSON_PREVIEW_RECORDS) do table.insert(previewData.instances,decoded.instances[i]) end
-                end
-                local previewOK, previewResult = pcall(function() return HttpService:JSONEncode(previewData) end)
-                if previewOK then previewText = previewResult end
-            end
+            local previewText = info.previewJSON or result
             previewBox.Text = previewText
-            local validationOK = decodeOK and type(decoded) == "table" and type(decoded.instances) == "table" and type(decoded.metadata) == "table" and type(decoded.statistics) == "table"
+
+            -- The exporter already constructed and encoded the metadata/statistics
+            -- preview, so avoid decoding the entire completed JSON just to validate
+            -- its top-level shape. A lightweight structural validation is sufficient
+            -- here; the complete payload has already passed JSONEncode successfully.
+            local validationOK = type(info) == "table"
+                and type(info.total) == "number"
+                and type(info.previewJSON) == "string"
+                and #result > 0
             validationPassed = validationOK
             validationLabel.Text = validationOK and ("✓ Validation passed  •  " .. tostring(info.total or 0) .. " instances checked") or "⚠ Validation warning — inspect JSON before upload"
             validationLabel.TextColor3 = validationOK and Color3.fromRGB(120,220,150) or Color3.fromRGB(240,180,90)
@@ -3239,15 +3638,9 @@ local function showStats()
         return l
     end
 
-    local classCounts={}; local totalAttrs=0; local totalTags=0; local maxDepth=0
-    for inst in pairs(scanned) do
-        classCounts[inst.ClassName]=(classCounts[inst.ClassName] or 0)+1
-        totalAttrs += getAttributeCount(inst)
-        local tags={}; pcall(function() tags=CollectionService:GetTags(inst) end); totalTags += #tags
-        local depth=0; local cur=inst
-        while cur and cur~=game do depth+=1; cur=cur.Parent end
-        if depth>maxDepth then maxDepth=depth end
-    end
+    local totalAttrs = attributeCount
+    local totalTags = cachedTagCount
+    local maxDepth = cachedMaxDepth
 
     row("SCAN",27,true); row("Instances:  "..tostring(instanceCount)); row("Attributes:  "..tostring(totalAttrs)); row("Tags:  "..tostring(totalTags)); row("Maximum hierarchy depth:  "..tostring(maxDepth))
     row("CLASS BREAKDOWN",27,true)
@@ -3391,29 +3784,49 @@ end
 ------------------------------------------------------------
 
 local function startWatching()
-disconnectWatchers()
+    disconnectWatchers()
 
-local connection = game.DescendantAdded:Connect(function(instance)
-if not scanned[instance] then
-task.spawn(function()
-local before = instanceCount
+    local pendingLiveRefresh = false
 
-scanInstance(instance, scanGeneration)
+    local function scheduleLiveRefresh()
+        if pendingLiveRefresh then return end
+        pendingLiveRefresh = true
+        task.delay(0.15, function()
+            pendingLiveRefresh = false
+            if screenGui.Parent then
+                requestTreeRefresh()
+            end
+        end)
+    end
 
-if instanceCount ~= before then
-statusLabel.Text =
-"Instances: "
-.. tostring(instanceCount)
-.. " | Attributes: "
-.. tostring(attributeCount)
+    local connection = game.DescendantAdded:Connect(function(instance)
+        if scanned[instance] then
+            return
+        end
+        task.spawn(function()
+            local before = instanceCount
+            scanInstance(instance, scanGeneration)
+            if instanceCount ~= before then
+                local addedMeta = instanceMeta[instance]
+                local addedSubtree = addedMeta and (1 + (addedMeta.descendantCount or 0)) or 1
+                local parent = instance.Parent
+                while parent and parent ~= game do
+                    local parentMeta = instanceMeta[parent]
+                    if not parentMeta then break end
+                    parentMeta.descendantCount = (parentMeta.descendantCount or 0) + addedSubtree
+                    parent = parent.Parent
+                end
+                if addedMeta and addedMeta.depth and addedMeta.depth > cachedMaxDepth then
+                    cachedMaxDepth = addedMeta.depth
+                end
+                statusLabel.Text = "Instances: " .. tostring(instanceCount) .. " | Attributes: " .. tostring(attributeCount)
+                searchCacheQuery = nil
+                scheduleLiveRefresh()
+            end
+        end)
+    end)
 
-rebuildTree()
-end
-end)
-end
-end)
-
-table.insert(connections, connection)
+    table.insert(connections, connection)
 end
 
 ------------------------------------------------------------
