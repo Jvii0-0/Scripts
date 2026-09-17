@@ -850,15 +850,141 @@ end
 -- JSON
 ------------------------------------------------------------
 
--- ============================================================
--- JSON EXPORT
--- ============================================================
-
 local JSON_YIELD_EVERY = 100
 
+local function safeJSONValue(value)
+    local valueType = typeof(value)
+
+    -- Basic JSON-safe values
+    if value == nil
+        or valueType == "string"
+        or valueType == "boolean"
+        or valueType == "number" then
+
+        -- JSON does not accept NaN / infinity.
+        if valueType == "number" then
+            if value ~= value or value == math.huge or value == -math.huge then
+                return {
+                    type = "number",
+                    value = tostring(value)
+                }
+            end
+        end
+
+        return value
+    end
+
+    -- Roblox datatypes
+    if valueType == "Vector3" then
+        return {
+            type = "Vector3",
+            X = value.X,
+            Y = value.Y,
+            Z = value.Z
+        }
+
+    elseif valueType == "Vector2" then
+        return {
+            type = "Vector2",
+            X = value.X,
+            Y = value.Y
+        }
+
+    elseif valueType == "Color3" then
+        return {
+            type = "Color3",
+            R = value.R,
+            G = value.G,
+            B = value.B
+        }
+
+    elseif valueType == "CFrame" then
+        local components = {value:GetComponents()}
+
+        return {
+            type = "CFrame",
+            components = components
+        }
+
+    elseif valueType == "UDim2" then
+        return {
+            type = "UDim2",
+            X = {
+                Scale = value.X.Scale,
+                Offset = value.X.Offset
+            },
+            Y = {
+                Scale = value.Y.Scale,
+                Offset = value.Y.Offset
+            }
+        }
+
+    elseif valueType == "UDim" then
+        return {
+            type = "UDim",
+            Scale = value.Scale,
+            Offset = value.Offset
+        }
+
+    elseif valueType == "BrickColor" then
+        return {
+            type = "BrickColor",
+            Name = value.Name,
+            Number = value.Number
+        }
+
+    elseif valueType == "EnumItem" then
+        return {
+            type = "EnumItem",
+            EnumType = tostring(value.EnumType),
+            Name = value.Name,
+            Value = value.Value
+        }
+
+    elseif valueType == "Instance" then
+        return {
+            type = "Instance",
+            Name = value.Name,
+            ClassName = value.ClassName,
+            Path = getPath(value)
+        }
+    end
+
+    -- Tables are handled recursively.
+    if valueType == "table" then
+        local result = {}
+
+        for key, item in pairs(value) do
+            local safeKey = tostring(key)
+
+            local ok, safeValue = pcall(function()
+                return safeJSONValue(item)
+            end)
+
+            if ok then
+                result[safeKey] = safeValue
+            else
+                result[safeKey] = tostring(item)
+            end
+        end
+
+        return {
+            type = "table",
+            value = result
+        }
+    end
+
+    -- Anything unknown gets converted to text rather than being
+    -- passed directly to JSONEncode.
+    return {
+        type = valueType,
+        value = tostring(value)
+    }
+end
+
+
 local function showJSON()
-    -- Create the JSON window FIRST.
-    -- This means the user sees something immediately after clicking.
+    -- Create the window immediately.
     local jsonGui = Instance.new("Frame")
     jsonGui.Name = "JSONExport"
     jsonGui.Size = UDim2.new(0, 750, 0, 500)
@@ -902,7 +1028,7 @@ local function showJSON()
     closeCorner.CornerRadius = UDim.new(0, 5)
     closeCorner.Parent = jsonClose
 
-    -- Status label
+    -- Status
     local jsonStatus = Instance.new("TextLabel")
     jsonStatus.Size = UDim2.new(1, -30, 0, 25)
     jsonStatus.Position = UDim2.new(0, 15, 0, 42)
@@ -915,7 +1041,7 @@ local function showJSON()
     jsonStatus.ZIndex = 2001
     jsonStatus.Parent = jsonGui
 
-    -- JSON text box
+    -- JSON textbox
     local jsonBox = Instance.new("TextBox")
     jsonBox.Size = UDim2.new(1, -30, 1, -85)
     jsonBox.Position = UDim2.new(0, 15, 0, 72)
@@ -942,8 +1068,7 @@ local function showJSON()
         jsonGui:Destroy()
     end)
 
-    -- Snapshot the scanned Instances.
-    -- We do this separately so the export has a stable set to process.
+    -- Snapshot scanned Instances
     local instances = {}
 
     for instance in pairs(scanned) do
@@ -955,42 +1080,64 @@ local function showJSON()
         #instances
     )
 
-    -- Export asynchronously so the click handler does not block the UI.
     task.spawn(function()
+
         local success, result = pcall(function()
             local encodedEntries = {}
             local total = #instances
 
-            -- Build and encode each Instance independently.
-            -- This avoids creating one enormous Lua table and then
-            -- JSONEncode-ing the entire thing in one operation.
             for i, instance in ipairs(instances) do
-                -- The Instance may have been destroyed since the scan.
-                if instance and instance.Parent then
-                    local attributes = {}
 
+                if instance and instance.Parent then
+
+                    local attributes = {}
                     local rawAttributes = getAttributes(instance)
 
                     for key, value in pairs(rawAttributes) do
-                        attributes[key] = serializeValue(value)
+                        local ok, safeValue = pcall(function()
+                            return safeJSONValue(value)
+                        end)
+
+                        if ok then
+                            attributes[tostring(key)] = safeValue
+                        else
+                            attributes[tostring(key)] = {
+                                type = typeof(value),
+                                value = tostring(value)
+                            }
+                        end
                     end
 
                     local entry = {
-                        name = instance.Name,
-                        className = instance.ClassName,
-                        path = getPath(instance),
+                        name = tostring(instance.Name),
+                        className = tostring(instance.ClassName),
+                        path = tostring(getPath(instance)),
                         attributes = attributes
                     }
 
-                    -- Encode this entry individually.
-                    encodedEntries[i] = HttpService:JSONEncode(entry)
+                    -- Protect this individual entry.
+                    local encodedOK, encoded = pcall(function()
+                        return HttpService:JSONEncode(entry)
+                    end)
+
+                    if encodedOK then
+                        encodedEntries[i] = encoded
+                    else
+                        -- Do not abort the entire export.
+                        encodedEntries[i] = HttpService:JSONEncode({
+                            name = tostring(instance.Name),
+                            className = tostring(instance.ClassName),
+                            path = tostring(getPath(instance)),
+                            attributes = {},
+                            exportError = tostring(encoded)
+                        })
+                    end
+
                 else
-                    -- Keep the array position valid.
                     encodedEntries[i] = "null"
                 end
 
-                -- Yield periodically so the Roblox client can render
-                -- and process input while the export is running.
+                -- Yield regularly so the client remains responsive.
                 if i % JSON_YIELD_EVERY == 0 then
                     jsonStatus.Text = string.format(
                         "Generating JSON... %d / %d (%.1f%%)",
@@ -1003,25 +1150,20 @@ local function showJSON()
                 end
             end
 
-            -- One final yield before assembling the finished string.
             task.wait()
 
             jsonStatus.Text = "Assembling JSON..."
 
-            -- Since every individual entry was already JSON encoded,
-            -- concatenating them avoids another huge JSONEncode call.
-            local json = "[" .. table.concat(encodedEntries, ",") .. "]"
-
-            return json
+            return "[" .. table.concat(encodedEntries, ",") .. "]"
         end)
 
-        -- The window may have been closed while the export was running.
         if not jsonGui or not jsonGui.Parent then
             return
         end
 
         if success then
             jsonBox.Text = result
+
             jsonStatus.Text = string.format(
                 "JSON export complete — %d Instances",
                 #instances
