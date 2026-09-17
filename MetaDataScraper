@@ -63,8 +63,6 @@ screenGui.IgnoreGuiInset = true
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
 screenGui.DisplayOrder = 2147483647
 screenGui.DisplayOrder = 10000 -- Keep inspector above other game ScreenGuis
-screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-screenGui.DisplayOrder = 2147483647 -- Put inspector ScreenGui above other game ScreenGuis
 screenGui.Parent = playerGui
 
 ------------------------------------------------------------
@@ -261,6 +259,13 @@ local jsonButton = createButton(
     "JSON",
     UDim2.fromOffset(300, 0),
     70
+)
+
+local copySelectedButton = createButton(
+    "CopySelected",
+    "Copy Selected",
+    UDim2.fromOffset(375, 0),
+    105
 )
 
 ------------------------------------------------------------
@@ -953,6 +958,112 @@ local function showJSON()
 end
 
 ------------------------------------------------------------
+-- COPY SELECTED INSTANCE
+------------------------------------------------------------
+
+local function showSelectedCopy()
+    if not selectedInstance then
+        statusLabel.Text = "No Instance selected"
+        return
+    end
+
+    local instance = selectedInstance
+    local attributes = getAttributes(instance)
+    local lines = {}
+
+    table.insert(lines, "Name: " .. instance.Name)
+    table.insert(lines, "Class: " .. instance.ClassName)
+    table.insert(lines, "Path: " .. getPath(instance))
+
+    local children = 0
+    pcall(function()
+        children = #instance:GetChildren()
+    end)
+
+    table.insert(lines, "Children: " .. tostring(children))
+    table.insert(lines, "Attributes: " .. tostring(getAttributeCount(instance)))
+    table.insert(lines, "")
+    table.insert(lines, "ATTRIBUTE VALUES")
+
+    if next(attributes) then
+        for name, value in pairs(attributes) do
+            table.insert(lines, tostring(name) .. " = " .. tostring(value) .. " [" .. typeof(value) .. "]")
+        end
+    else
+        table.insert(lines, "No attributes.")
+    end
+
+    local copyText = table.concat(lines, "\n")
+
+    local copyGui = Instance.new("Frame")
+    copyGui.Name = "CopySelectedWindow"
+    copyGui.Size = UDim2.fromOffset(650, 420)
+    copyGui.Position = UDim2.new(0.5, -325, 0.5, -210)
+    copyGui.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
+    copyGui.BorderSizePixel = 0
+    copyGui.ZIndex = 2000
+    copyGui.Parent = screenGui
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = copyGui
+
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, -50, 0, 40)
+    title.Position = UDim2.fromOffset(10, 0)
+    title.BackgroundTransparency = 1
+    title.Text = "Copy Selected Instance"
+    title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    title.TextSize = 17
+    title.Font = Enum.Font.GothamBold
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.ZIndex = 31
+    title.Parent = copyGui
+
+    local close = Instance.new("TextButton")
+    close.Size = UDim2.fromOffset(35, 30)
+    close.Position = UDim2.new(1, -42, 0, 5)
+    close.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+    close.TextColor3 = Color3.fromRGB(255, 255, 255)
+    close.Text = "✕"
+    close.TextSize = 15
+    close.BorderSizePixel = 0
+    close.ZIndex = 31
+    close.Parent = copyGui
+
+    local closeCorner = Instance.new("UICorner")
+    closeCorner.CornerRadius = UDim.new(0, 5)
+    closeCorner.Parent = close
+
+    close.MouseButton1Click:Connect(function()
+        copyGui:Destroy()
+    end)
+
+    local textBox = Instance.new("TextBox")
+    textBox.Size = UDim2.new(1, -20, 1, -55)
+    textBox.Position = UDim2.fromOffset(10, 45)
+    textBox.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+    textBox.TextColor3 = Color3.fromRGB(220, 220, 220)
+    textBox.Text = copyText
+    textBox.TextSize = 13
+    textBox.Font = Enum.Font.Code
+    textBox.TextXAlignment = Enum.TextXAlignment.Left
+    textBox.TextYAlignment = Enum.TextYAlignment.Top
+    textBox.MultiLine = true
+    textBox.ClearTextOnFocus = false
+    textBox.TextEditable = true
+    textBox.BorderSizePixel = 0
+    textBox.ZIndex = 31
+    textBox.Parent = copyGui
+
+    task.defer(function()
+        textBox:CaptureFocus()
+        textBox.CursorPosition = #textBox.Text + 1
+        textBox.SelectionStart = 1
+    end)
+end
+
+------------------------------------------------------------
 -- EXPAND / COLLAPSE
 ------------------------------------------------------------
 
@@ -1147,6 +1258,12 @@ end)
 
 jsonButton.MouseButton1Click:Connect(function()
     showJSON()
+end)
+
+------------------------------------------------------------
+
+copySelectedButton.MouseButton1Click:Connect(function()
+    showSelectedCopy()
 end)
 
 ------------------------------------------------------------
