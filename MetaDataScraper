@@ -858,7 +858,7 @@ local JSON_BATCH_SIZE = 25
 local JSON_PREVIEW_RECORDS = 25
 
 -- PUT YOUR WEBHOOK URL HERE
-local DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1550124148779384912/altEJPJIA5NNDFFn-g7ATiO85E6Do__0I-5VvnohV8O034_jXbHNA0qzvclTPAKU_XJn"
+local DISCORD_WEBHOOK_URL = "PUT_YOUR_NEW_WEBHOOK_HERE"
 
 local fullJSON = ""
 local jsonGenerating = false
@@ -1461,6 +1461,198 @@ local function buildJSONAsync(updateStatus, selectedOnly)
     -- Build a complete recursive record for a selected instance.
     -- This keeps the normal full-scan export compact, while selected
     -- folder exports include the entire descendant hierarchy.
+
+    -- Properties are read defensively with pcall because Roblox classes
+    -- expose different property sets. Only properties that actually exist
+    -- and can be read are included. Script source is intentionally excluded.
+    local PROPERTY_GROUPS = {
+        -- Common Instance
+        {"Archivable"},
+
+        -- BasePart / Part / MeshPart / UnionOperation
+        {
+            "Anchored", "CanCollide", "CanTouch", "CanQuery",
+            "CFrame", "Position", "Orientation", "Size",
+            "Transparency", "Material", "Color", "Shape",
+            "CastShadow", "Massless", "Reflectance", "CollisionGroup",
+            "CustomPhysicalProperties", "AssemblyLinearVelocity",
+            "AssemblyAngularVelocity", "Velocity", "RotVelocity",
+            "Locked", "TopSurface", "BottomSurface", "LeftSurface",
+            "RightSurface", "FrontSurface", "BackSurface",
+            "RootPriority", "Elasticity", "Friction", "FrictionWeight",
+            "ElasticityWeight", "EnableFluidForces"
+        },
+
+        -- MeshPart / SpecialMesh
+        {
+            "MeshId", "TextureID", "TextureId", "RenderFidelity",
+            "DoubleSided", "VertexColor", "Offset", "Scale",
+            "MeshType"
+        },
+
+        -- Model
+        {"PrimaryPart", "WorldPivot", "LevelOfDetail", "ModelStreamingMode", "ModelStreamingMode"},
+
+        -- ValueBase / ObjectValue family
+        {"Value"},
+
+        -- Attachment
+        {
+            "Axis", "SecondaryAxis", "CFrame", "Position", "Orientation",
+            "WorldCFrame", "WorldPosition", "WorldOrientation", "Visible"
+        },
+
+        -- Welds / constraints / joints
+        {
+            "Part0", "Part1", "Attachment0", "Attachment1",
+            "Enabled", "Active", "LimitsEnabled", "UpperAngle", "LowerAngle",
+            "TwistLimitsEnabled", "TwistLowerAngle", "TwistUpperAngle",
+            "TargetAngle", "AngularVelocity", "ServoMaxTorque",
+            "MotorMaxTorque", "MotorMaxAcceleration", "MaxForce",
+            "MaxTorque", "RigidityEnabled", "ReactionTorqueEnabled",
+            "Restitution", "Responsiveness", "MaxAxesForce", "MaxAxesTorque"
+        },
+
+        -- Decal / Texture / SurfaceAppearance
+        {
+            "Texture", "TextureId", "Face", "Color3", "StudsPerTileU",
+            "StudsPerTileV", "OffsetStudsU", "OffsetStudsV", "Transparency",
+            "AlphaMode", "ColorMap", "MetalnessMap", "NormalMap", "RoughnessMap"
+        },
+
+        -- Lights
+        {
+            "Brightness", "Range", "Shadows", "Enabled", "Color",
+            "Angle", "Face"
+        },
+
+        -- ParticleEmitter / Beam / Trail
+        {
+            "Rate", "Lifetime", "Speed", "SpreadAngle", "LightEmission",
+            "LightInfluence", "Drag", "LockedToPart", "EmissionDirection",
+            "Shape", "ShapeInOut", "ShapeStyle", "Size", "Transparency",
+            "Color", "Squash", "Brightness", "Width0", "Width1",
+            "FaceCamera", "Segments", "TextureMode", "Attachment0", "Attachment1",
+            "Texture", "TextureLength", "TextureSpeed", "ZOffset",
+            "Acceleration", "VelocityInheritance", "RotSpeed", "Rotation",
+            "FlipbookLayout", "FlipbookMode", "FlipbookFramerate", "FlipbookStartRandom"
+        },
+
+        -- Sound
+        {
+            "SoundId", "Volume", "PlaybackSpeed", "Looped", "Playing",
+            "TimePosition", "PlaybackRegionsEnabled", "PlaybackRegion",
+            "RollOffMaxDistance", "RollOffMinDistance", "RollOffMode",
+            "EmitterSize", "SoundGroup", "PlayOnRemove", "IsLoaded"
+        },
+
+        -- ProximityPrompt / ClickDetector / interaction
+        {
+            "ActionText", "ObjectText", "KeyboardKeyCode", "GamepadKeyCode",
+            "HoldDuration", "MaxActivationDistance", "RequiresLineOfSight",
+            "ClickablePrompt", "Exclusivity", "Style", "CursorIcon"
+        },
+
+        -- GUI base objects
+        {
+            "Visible", "Active", "Selectable", "ClipsDescendants",
+            "Position", "Size", "AnchorPoint", "Rotation",
+            "BackgroundColor3", "BackgroundTransparency",
+            "BorderColor3", "BorderSizePixel", "LayoutOrder",
+            "ZIndex", "AutomaticSize", "SizeConstraint", "Visible",
+            "AutomaticCanvasSize", "CanvasPosition", "CanvasSize",
+            "ScrollBarThickness", "ScrollingDirection", "ClipsDescendants"
+        },
+
+        -- TextLabel / TextButton / TextBox
+        {
+            "Text", "TextColor3", "TextSize", "TextTransparency", "TextStrokeColor3",
+            "TextStrokeTransparency", "TextXAlignment", "TextYAlignment",
+            "Font", "FontFace", "RichText", "TextWrapped", "TextScaled",
+            "LineHeight", "MaxVisibleGraphemes", "PlaceholderText",
+            "ClearTextOnFocus", "MultiLine", "TextEditable"
+        },
+
+        -- ImageLabel / ImageButton
+        {
+            "Image", "ImageColor3", "ImageTransparency", "ImageRectOffset",
+            "ImageRectSize", "ScaleType", "SliceCenter", "SliceScale",
+            "ResampleMode", "TileSize", "HoverImage", "PressedImage"
+        },
+
+        -- UI layout / styling
+        {
+            "FillDirection", "HorizontalAlignment", "VerticalAlignment",
+            "Padding", "SortOrder", "Wraps", "CellPadding", "CellSize",
+            "StartCorner", "CornerRadius", "Thickness", "Color",
+            "Transparency", "Offset"
+        },
+
+        -- Humanoid
+        {
+            "WalkSpeed", "JumpPower", "UseJumpPower", "HipHeight", "AutoRotate",
+            "Health", "MaxHealth", "RigType", "DisplayDistanceType",
+            "NameDisplayDistance", "HealthDisplayDistance", "DisplayName",
+            "BreakJointsOnDeath", "RequiresNeck", "PlatformStand", "Sit",
+            "AutoJumpEnabled", "EvaluateStateMachine"
+        },
+
+        -- Camera
+        {
+            "CFrame", "Focus", "FieldOfView", "CameraType", "CameraSubject",
+            "ViewportSize", "DiagonalFieldOfView", "HeadLocked", "HeadScale"
+        },
+
+        -- Animation / Animator / AnimationTrack where readable
+        {
+            "AnimationId", "Looped", "Priority", "Speed", "TimePosition",
+            "WeightCurrent", "WeightTarget", "Length", "IsPlaying"
+        },
+
+        -- Sky / atmosphere / environment
+        {
+            "SkyboxBk", "SkyboxDn", "SkyboxFt", "SkyboxLf", "SkyboxRt", "SkyboxUp",
+            "CelestialBodiesShown", "MoonAngularSize", "MoonTextureId",
+            "SunAngularSize", "SunTextureId", "StarCount", "SunAngularSize",
+            "Density", "Offset", "Color", "Decay", "Glare", "Haze"
+        }
+    }
+
+    local function collectRelevantProperties(instance)
+        local properties = {}
+        local seen = {}
+
+        for _, group in ipairs(PROPERTY_GROUPS) do
+            for _, propertyName in ipairs(group) do
+                if not seen[propertyName] then
+                    seen[propertyName] = true
+
+                    -- Name/ClassName/path are already represented at the record level.
+                    if propertyName ~= "Name" and propertyName ~= "ClassName" and propertyName ~= "Parent" then
+                        local ok, propertyValue = pcall(function()
+                            return instance[propertyName]
+                        end)
+
+                        if ok and propertyValue ~= nil then
+                            local valueOK, safeValue = pcall(function()
+                                return safeJSONValue(propertyValue)
+                            end)
+
+                            if valueOK then
+                                properties[propertyName] = {
+                                    dataType = typeof(propertyValue),
+                                    value = safeValue
+                                }
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        return properties
+    end
+
     local function buildInstanceRecord(instance, includeChildren)
         local attributes = {}
 
@@ -1518,7 +1710,8 @@ local function buildJSONAsync(updateStatus, selectedOnly)
             path = path,
             childrenCount = childCount,
             attributesCount = 0,
-            attributes = attributes
+            attributes = attributes,
+            properties = collectRelevantProperties(instance)
         }
 
         for _ in pairs(attributes) do
