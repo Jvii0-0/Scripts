@@ -11,6 +11,7 @@ Features:
 • Rescan
 • Expand All / Collapse All
 • JSON export
+• Remote Refresh / hot reload
 • Instance limit + yielding for performance
 
 This does NOT bypass Roblox replication/security.
@@ -35,6 +36,12 @@ local playerGui = player:WaitForChild("PlayerGui")
 local MAX_INSTANCES = 100000
 local YIELD_EVERY = 500
 
+-- Remote source used by the in-app Refresh button.
+local SCRIPT_VERSION = "2.7.0"
+local UPDATE_CHECK_INTERVAL = 60
+local UPDATE_INITIAL_DELAY = 8
+local UPDATE_URL = "https://raw.githubusercontent.com/Jvii0-0/Scripts/main/MetaDataScraper"
+
 ------------------------------------------------------------
 -- STATE
 ------------------------------------------------------------
@@ -53,6 +60,18 @@ local scanInProgress = false
 local scanGeneration = 0
 
 local connections = {}
+local runtimeConnections = {}
+local inspectorAlive = true
+local updateCheckInProgress = false
+local updatePrompt = nil
+local availableUpdateVersion = nil
+local dismissedUpdateVersion = nil
+
+-- If another copy is already running, clean it up before creating a new one.
+local previousCleanup = rawget(_G, "__ClientInspectorCleanup")
+if type(previousCleanup) == "function" then
+    pcall(previousCleanup)
+end
 
 local classFilter = ""
 local lastExportInfo = nil
@@ -85,6 +104,33 @@ screenGui.DisplayOrder = 10000 -- Keep inspector above other game ScreenGuis
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screenGui.DisplayOrder = 2147483647 -- Put inspector ScreenGui above other game ScreenGuis
 screenGui.Parent = playerGui
+
+local function disconnectRuntimeConnections()
+    for _, connection in ipairs(runtimeConnections) do
+        pcall(function() connection:Disconnect() end)
+    end
+    runtimeConnections = {}
+end
+
+local function cleanupInspector()
+    inspectorAlive = false
+    if updatePrompt then
+        pcall(function() updatePrompt:Destroy() end)
+        updatePrompt = nil
+    end
+    for _, connection in ipairs(connections) do
+        pcall(function() connection:Disconnect() end)
+    end
+    connections = {}
+    pcall(disconnectRuntimeConnections)
+    pcall(function()
+        if screenGui and screenGui.Parent then
+            screenGui:Destroy()
+        end
+    end)
+end
+
+_G.__ClientInspectorCleanup = cleanupInspector
 
 ------------------------------------------------------------
 -- UI THEME / POLISH
@@ -223,7 +269,7 @@ subtitleLabel.Name = "Subtitle"
 subtitleLabel.Size = UDim2.new(0.38, 0, 0, 16)
 subtitleLabel.Position = UDim2.fromOffset(16, 28)
 subtitleLabel.BackgroundTransparency = 1
-subtitleLabel.Text = "CLIENT-SIDE INSTANCE EXPLORER"
+subtitleLabel.Text = "CLIENT-SIDE INSTANCE EXPLORER  •  v" .. SCRIPT_VERSION
 subtitleLabel.TextColor3 = THEME.muted
 subtitleLabel.TextSize = 9
 subtitleLabel.Font = Enum.Font.GothamMedium
@@ -351,6 +397,13 @@ local jsonButton = createButton(
 "JSON",
 "JSON",
 UDim2.fromOffset(300, 0),
+70
+)
+
+local refreshButton = createButton(
+"Refresh",
+"Refresh",
+UDim2.fromOffset(380, 0),
 70
 )
 
@@ -3725,6 +3778,7 @@ end
 ------------------------------------------------------------
 
 local function startWatching()
+
     disconnectWatchers()
 
     local pendingLiveRefresh = false
@@ -3791,7 +3845,7 @@ end)
 end
 end)
 
-UserInputService.InputChanged:Connect(function(input)
+table.insert(runtimeConnections, UserInputService.InputChanged:Connect(function(input)
 if not buttonDragging then
 return
 end
@@ -3809,7 +3863,7 @@ buttonStartPosition.Y.Scale,
 buttonStartPosition.Y.Offset + delta.Y
 )
 end
-end)
+end))
 
 ------------------------------------------------------------
 -- DRAGGING MAIN PANEL
@@ -3835,7 +3889,7 @@ end)
 end
 end)
 
-UserInputService.InputChanged:Connect(function(input)
+table.insert(runtimeConnections, UserInputService.InputChanged:Connect(function(input)
 if not panelDragging then
 return
 end
@@ -3853,7 +3907,201 @@ panelStartPosition.Y.Scale,
 panelStartPosition.Y.Offset + delta.Y
 )
 end
-end)
+end))
+
+------------------------------------------------------------
+-- SELF REFRESH / HOT RELOAD
+------------------------------------------------------------
+
+local refreshInProgress = false
+
+local function fetchLatestSource()
+    local ok, result = pcall(function()
+        if type(game.HttpGet) == "function" then
+            return game:HttpGet(UPDATE_URL)
+        end
+        return nil
+    end)
+    if ok and type(result) == "string" and #result > 100 then
+        return result
+    end
+    return nil, "Unable to download the latest Inspector source."
+end
+
+local function refreshInspector()
+    if refreshInProgress then return end
+    refreshInProgress = true
+    setMainStatus("Downloading latest Inspector...", "working", 0.25)
+
+    task.spawn(function()
+        local source, fetchError = fetchLatestSource()
+        if not source then
+            refreshInProgress = false
+            setMainStatus(fetchError or "Refresh failed.", "error")
+            return
+        end
+
+        -- Never replace the running optimized Inspector with an older remote
+        -- copy that does not contain the hot-reload contract.
+        if not string.find(source, "__ClientInspectorCleanup", 1, true)
+            or not string.find(source, "SCRIPT_VERSION", 1, true) then
+            refreshInProgress = false
+            setMainStatus("Refresh blocked: remote script is missing hot-reload support.", "error")
+            return
+        end
+
+        setMainStatus("Validating latest Inspector...", "working", 0.55)
+        local compiler = loadstring
+        if type(compiler) ~= "function" then
+            refreshInProgress = false
+            setMainStatus("Refresh unavailable: loadstring is not supported.", "error")
+            return
+        end
+
+        local chunk, compileError = compiler(source)
+        if type(chunk) ~= "function" then
+            refreshInProgress = false
+            setMainStatus("Refresh failed: " .. tostring(compileError or "invalid source"), "error")
+            return
+        end
+
+        setMainStatus("Reloading Inspector...", "working", 0.85)
+        task.wait()
+        pcall(cleanupInspector)
+        refreshInProgress = false
+
+        local ok, runtimeError = pcall(chunk)
+        if not ok then
+            warn("[Client Inspector] Hot refresh error: " .. tostring(runtimeError))
+        end
+    end)
+end
+
+local function parseVersion(version)
+    local a, b, c = tostring(version or "0"):match("^(%d+)%.(%d+)%.(%d+)")
+    return tonumber(a) or 0, tonumber(b) or 0, tonumber(c) or 0
+end
+
+local function isNewerVersion(remoteVersion, localVersion)
+    local ra, rb, rc = parseVersion(remoteVersion)
+    local la, lb, lc = parseVersion(localVersion)
+    if ra ~= la then return ra > la end
+    if rb ~= lb then return rb > lb end
+    return rc > lc
+end
+
+local function extractRemoteVersion(source)
+    if type(source) ~= "string" then return nil end
+    return source:match("SCRIPT_VERSION%s*=%s*[\"']([%d%.]+)[\"']")
+end
+
+local function hideUpdatePrompt()
+    if updatePrompt then
+        updatePrompt:Destroy()
+        updatePrompt = nil
+    end
+end
+
+local function showUpdatePrompt(remoteVersion)
+    if not inspectorAlive or not mainFrame.Parent then return end
+    if updatePrompt and updatePrompt.Parent then return end
+    availableUpdateVersion = remoteVersion
+
+    local prompt = Instance.new("Frame")
+    prompt.Name = "InspectorUpdatePrompt"
+    prompt.Size = UDim2.new(0, 330, 0, 92)
+    prompt.AnchorPoint = Vector2.new(1, 1)
+    prompt.Position = UDim2.new(1, -14, 1, -46)
+    prompt.BackgroundColor3 = THEME.panel2
+    prompt.BorderSizePixel = 0
+    prompt.ZIndex = 30000
+    prompt.Parent = screenGui
+    round(prompt, 9)
+    stroke(prompt, THEME.accent, 0.05, 1)
+    updatePrompt = prompt
+
+    local title = Instance.new("TextLabel")
+    title.BackgroundTransparency = 1
+    title.Position = UDim2.fromOffset(12, 8)
+    title.Size = UDim2.new(1, -24, 0, 22)
+    title.Font = Enum.Font.GothamSemibold
+    title.Text = "Inspector update available"
+    title.TextColor3 = THEME.text
+    title.TextSize = 13
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.ZIndex = 30001
+    title.Parent = prompt
+
+    local detail = Instance.new("TextLabel")
+    detail.BackgroundTransparency = 1
+    detail.Position = UDim2.fromOffset(12, 30)
+    detail.Size = UDim2.new(1, -24, 0, 20)
+    detail.Font = Enum.Font.Gotham
+    detail.Text = "v" .. tostring(SCRIPT_VERSION) .. " → v" .. tostring(remoteVersion)
+    detail.TextColor3 = THEME.muted
+    detail.TextSize = 11
+    detail.TextXAlignment = Enum.TextXAlignment.Left
+    detail.ZIndex = 30001
+    detail.Parent = prompt
+
+    local later = Instance.new("TextButton")
+    later.Size = UDim2.fromOffset(88, 26)
+    later.Position = UDim2.new(1, -188, 1, -34)
+    later.BackgroundColor3 = THEME.surface
+    later.BorderSizePixel = 0
+    later.Text = "Later"
+    later.TextColor3 = THEME.text
+    later.TextSize = 11
+    later.Font = Enum.Font.GothamMedium
+    later.ZIndex = 30001
+    later.Parent = prompt
+    round(later, 6)
+
+    local update = Instance.new("TextButton")
+    update.Size = UDim2.fromOffset(88, 26)
+    update.Position = UDim2.new(1, -94, 1, -34)
+    update.BackgroundColor3 = THEME.accent
+    update.BorderSizePixel = 0
+    update.Text = "Update"
+    update.TextColor3 = Color3.fromRGB(255,255,255)
+    update.TextSize = 11
+    update.Font = Enum.Font.GothamSemibold
+    update.ZIndex = 30001
+    update.Parent = prompt
+    round(update, 6)
+
+    later.Activated:Connect(function()
+        hideUpdatePrompt()
+        dismissedUpdateVersion = availableUpdateVersion
+        setMainStatus("Update postponed", "ready")
+    end)
+
+    update.Activated:Connect(function()
+        hideUpdatePrompt()
+        refreshInspector()
+    end)
+
+    local camera = workspace.CurrentCamera
+    if camera and camera.ViewportSize.X <= 600 then
+        prompt.Size = UDim2.new(1, -20, 0, 92)
+        prompt.Position = UDim2.new(0, 10, 1, -46)
+    end
+end
+
+local function checkForInspectorUpdate()
+    if not inspectorAlive or refreshInProgress or updateCheckInProgress then return end
+    updateCheckInProgress = true
+    task.spawn(function()
+        local source = fetchLatestSource()
+        if inspectorAlive and source then
+            local remoteVersion = extractRemoteVersion(source)
+            if remoteVersion and isNewerVersion(remoteVersion, SCRIPT_VERSION) and remoteVersion ~= dismissedUpdateVersion then
+                showUpdatePrompt(remoteVersion)
+            end
+        end
+        updateCheckInProgress = false
+    end)
+end
 
 ------------------------------------------------------------
 -- BUTTON EVENTS
@@ -3901,6 +4149,9 @@ jsonButton.MouseButton1Click:Connect(function()
 showJSON()
 end)
 
+refreshButton.MouseButton1Click:Connect(function()
+refreshInspector()
+end)
 
 filterButton.MouseButton1Click:Connect(function()
 showClassFilter()
@@ -3972,10 +4223,10 @@ local function updateMobileLayout()
     toolbar.Size = UDim2.new(1,-20,0,toolbarHeight)
     toolbar.Position = UDim2.fromOffset(10,top)
 
-    local buttons={rescanButton,expandButton,collapseButton,jsonButton,filterButton}
-    local desktopLabels={"Rescan","Expand All","Collapse All","JSON","Class"}
-    local compactLabels={"Scan","Expand","Collapse","JSON","Class"}
-    local phoneLabels={"Scan","Exp","Col","JSON","Class"}
+    local buttons={rescanButton,expandButton,collapseButton,jsonButton,refreshButton,filterButton}
+    local desktopLabels={"Rescan","Expand All","Collapse All","JSON","Refresh","Class"}
+    local compactLabels={"Scan","Expand","Collapse","JSON","Refresh","Class"}
+    local phoneLabels={"Scan","Exp","Col","JSON","↻","Class"}
     local gap = phone and 2 or (compact and 4 or 6)
     local availableWidth = math.max(300, mainFrame.AbsoluteSize.X - 20)
     local minButton = phone and 26 or (compact and 48 or 34)
@@ -4025,13 +4276,13 @@ end
 updateMobileLayout()
 
 if workspace.CurrentCamera then
-workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updateMobileLayout)
+table.insert(runtimeConnections, workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updateMobileLayout))
 end
 
 ------------------------------------------------------------
 -- KEYBOARD SHORTCUTS
 ------------------------------------------------------------
-UserInputService.InputBegan:Connect(function(input, processed)
+table.insert(runtimeConnections, UserInputService.InputBegan:Connect(function(input, processed)
 if processed then return end
 if input.KeyCode == Enum.KeyCode.F and mainFrame.Visible then
 searchBox:CaptureFocus()
@@ -4041,7 +4292,7 @@ if screenGui:FindFirstChild("JSONExportWindow") then
 end
 if screenGui:FindFirstChild("InspectorClassFilter") then screenGui.InspectorClassFilter:Destroy() end
 end
-end)
+end))
 
 ------------------------------------------------------------
 -- INITIALIZE
@@ -4051,3 +4302,13 @@ showDetails(nil)
 refreshStatusCounts()
 performScan()
 startWatching()
+
+-- Background update checks never reload automatically. If a newer version is found,
+-- the Inspector asks the user before replacing the running copy.
+task.spawn(function()
+    task.wait(UPDATE_INITIAL_DELAY)
+    while inspectorAlive do
+        checkForInspectorUpdate()
+        task.wait(UPDATE_CHECK_INTERVAL)
+    end
+end)
