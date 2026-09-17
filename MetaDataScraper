@@ -76,7 +76,7 @@ toggleButton.Position = UDim2.new(0.5, -27, 0.5, -27)
 
 toggleButton.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
 toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-toggleButton.Text = "Open"
+toggleButton.Text = "🔎"
 toggleButton.TextSize = 24
 toggleButton.BorderSizePixel = 0
 toggleButton.AutoButtonColor = true
@@ -98,8 +98,9 @@ toggleStroke.Parent = toggleButton
 
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "InspectorWindow"
-mainFrame.Size = UDim2.fromOffset(720, 500)
-mainFrame.Position = UDim2.new(0.5, -360, 0.5, -250)
+mainFrame.Size = UDim2.new(0.94, 0, 0.88, 0)
+mainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
 
 mainFrame.BackgroundColor3 = Color3.fromRGB(24, 24, 24)
 mainFrame.BorderSizePixel = 0
@@ -134,7 +135,7 @@ titleCorner.Parent = titleBar
 
 local titleLabel = Instance.new("TextLabel")
 titleLabel.Name = "Title"
-titleLabel.Size = UDim2.new(1, -20, 1, 0)
+titleLabel.Size = UDim2.new(0.42, 0, 1, 0)
 titleLabel.Position = UDim2.fromOffset(12, 0)
 titleLabel.BackgroundTransparency = 1
 titleLabel.Text = "Client Inspector"
@@ -145,14 +146,37 @@ titleLabel.TextXAlignment = Enum.TextXAlignment.Left
 titleLabel.ZIndex = 12
 titleLabel.Parent = titleBar
 
+local closeButton = Instance.new("TextButton")
+closeButton.Name = "CloseButton"
+closeButton.Size = UDim2.fromOffset(34, 32)
+closeButton.Position = UDim2.new(1, -39, 0, 5)
+closeButton.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeButton.Text = "X"
+closeButton.TextSize = 16
+closeButton.Font = Enum.Font.GothamBold
+closeButton.BorderSizePixel = 0
+closeButton.AutoButtonColor = true
+closeButton.ZIndex = 14
+closeButton.Parent = titleBar
+
+local closeCorner = Instance.new("UICorner")
+closeCorner.CornerRadius = UDim.new(0, 5)
+closeCorner.Parent = closeButton
+
+closeButton.Activated:Connect(function()
+    mainFrame.Visible = false
+    toggleButton.Text = "Open"
+end)
+
 ------------------------------------------------------------
 -- SEARCH BOX
 ------------------------------------------------------------
 
 local searchBox = Instance.new("TextBox")
 searchBox.Name = "Search"
-searchBox.Size = UDim2.new(0, 260, 0, 32)
-searchBox.Position = UDim2.new(1, -275, 0, 5)
+searchBox.Size = UDim2.new(0.32, 0, 0, 32)
+searchBox.Position = UDim2.new(0.54, 0, 0, 5)
 
 searchBox.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
 searchBox.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -169,33 +193,6 @@ searchBox.Parent = titleBar
 local searchCorner = Instance.new("UICorner")
 searchCorner.CornerRadius = UDim.new(0, 5)
 searchCorner.Parent = searchBox
-
-------------------------------------------------------------
--- CLOSE BUTTON
-------------------------------------------------------------
-
-local closeButton = Instance.new("TextButton")
-closeButton.Name = "CloseButton"
-closeButton.Size = UDim2.fromOffset(34, 32)
-closeButton.Position = UDim2.new(1, -42, 0, 5)
-closeButton.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-closeButton.Text = "X"
-closeButton.TextSize = 16
-closeButton.Font = Enum.Font.GothamBold
-closeButton.BorderSizePixel = 0
-closeButton.AutoButtonColor = true
-closeButton.ZIndex = 14
-closeButton.Parent = titleBar
-
-local closeCorner = Instance.new("UICorner")
-closeCorner.CornerRadius = UDim.new(0, 5)
-closeCorner.Parent = closeButton
-
-closeButton.MouseButton1Click:Connect(function()
-    mainFrame.Visible = false
-    toggleButton.Text = "Open"
-end)
 
 ------------------------------------------------------------
 -- TOOLBAR
@@ -362,48 +359,6 @@ local detailsLayout = Instance.new("UIListLayout")
 detailsLayout.SortOrder = Enum.SortOrder.LayoutOrder
 detailsLayout.Padding = UDim.new(0, 5)
 detailsLayout.Parent = detailsScroll
-
-------------------------------------------------------------
--- MOBILE LAYOUT
-------------------------------------------------------------
-
-local function updateMobileLayout()
-    local camera = workspace.CurrentCamera
-    if not camera then
-        return
-    end
-
-    local viewport = camera.ViewportSize
-    local mobile = viewport.X <= 600
-
-    if mobile then
-        local width = math.max(300, math.min(380, viewport.X - 16))
-        local height = math.max(300, math.min(520, viewport.Y - 32))
-
-        mainFrame.Size = UDim2.fromOffset(width, height)
-        mainFrame.Position = UDim2.new(0.5, -width / 2, 0.5, -height / 2)
-
-        searchBox.Size = UDim2.fromOffset(math.max(60, width - 145), 32)
-        searchBox.Position = UDim2.new(1, -143, 0, 5)
-        titleLabel.Size = UDim2.new(1, -150, 1, 0)
-    else
-        local width = math.min(720, viewport.X - 40)
-        local height = math.min(500, viewport.Y - 80)
-
-        mainFrame.Size = UDim2.fromOffset(math.max(420, width), math.max(320, height))
-        mainFrame.Position = UDim2.new(0.5, -mainFrame.AbsoluteSize.X / 2, 0.5, -mainFrame.AbsoluteSize.Y / 2)
-
-        searchBox.Size = UDim2.fromOffset(260, 32)
-        searchBox.Position = UDim2.new(1, -275, 0, 5)
-        titleLabel.Size = UDim2.new(1, -20, 1, 0)
-    end
-end
-
-updateMobileLayout()
-
-if workspace.CurrentCamera then
-    workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updateMobileLayout)
-end
 
 ------------------------------------------------------------
 -- HELPERS
@@ -1155,7 +1110,7 @@ end)
 -- BUTTON EVENTS
 ------------------------------------------------------------
 
-toggleButton.MouseButton1Click:Connect(function()
+toggleButton.Activated:Connect(function()
     mainFrame.Visible = not mainFrame.Visible
 
     if mainFrame.Visible then
@@ -1199,6 +1154,66 @@ searchBox:GetPropertyChangedSignal("Text"):Connect(function()
 
     rebuildTree()
 end)
+
+------------------------------------------------------------
+-- MOBILE LAYOUT
+------------------------------------------------------------
+
+local function updateMobileLayout()
+    local camera = workspace.CurrentCamera
+    if not camera then
+        return
+    end
+
+    local viewport = camera.ViewportSize
+    local isMobile = viewport.X <= 600
+
+    if isMobile then
+        mainFrame.Size = UDim2.new(0.94, 0, 0.88, 0)
+        mainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+        mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+
+        titleLabel.Size = UDim2.new(0.40, 0, 1, 0)
+        titleLabel.TextSize = 15
+        searchBox.Size = UDim2.new(0.28, 0, 0, 30)
+        searchBox.Position = UDim2.new(0.47, 0, 0, 6)
+        searchBox.TextSize = 12
+
+        toolbar.Size = UDim2.new(1, -20, 0, 70)
+        statusLabel.Visible = false
+
+        treeFrame.Size = UDim2.new(1, -20, 0.43, 0)
+        treeFrame.Position = UDim2.new(0, 10, 0, 95)
+
+        detailsFrame.Size = UDim2.new(1, -20, 0.43, 0)
+        detailsFrame.Position = UDim2.new(0, 10, 0.51, 0)
+    else
+        mainFrame.Size = UDim2.new(0.94, 0, 0.88, 0)
+        mainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+        mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+
+        titleLabel.Size = UDim2.new(0.42, 0, 1, 0)
+        titleLabel.TextSize = 18
+        searchBox.Size = UDim2.new(0.32, 0, 0, 32)
+        searchBox.Position = UDim2.new(0.54, 0, 0, 5)
+        searchBox.TextSize = 14
+
+        toolbar.Size = UDim2.new(1, -20, 0, 40)
+        statusLabel.Visible = true
+
+        treeFrame.Size = UDim2.new(0.52, -15, 1, -105)
+        treeFrame.Position = UDim2.fromOffset(10, 95)
+
+        detailsFrame.Size = UDim2.new(0.48, -15, 1, -105)
+        detailsFrame.Position = UDim2.new(0.52, 5, 0, 95)
+    end
+end
+
+updateMobileLayout()
+
+if workspace.CurrentCamera then
+    workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updateMobileLayout)
+end
 
 ------------------------------------------------------------
 -- INITIALIZE
