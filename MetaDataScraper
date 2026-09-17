@@ -850,172 +850,1041 @@ end
 -- JSON
 ------------------------------------------------------------
 
+--========================================================
+-- JSON EXPORT + DISCORD WEBHOOK
+--========================================================
+
 local JSON_BATCH_SIZE = 25
 local JSON_PREVIEW_RECORDS = 25
 
-local exportCancelled = false
-local jsonGui = nil
+-- PUT YOUR WEBHOOK URL HERE
+local DISCORD_WEBHOOK_URL = "PASTE_YOUR_WEBHOOK_URL_HERE"
+
 local fullJSON = ""
-local exportedRecordCount = 0
+local jsonGenerating = false
+local jsonCancelRequested = false
+local jsonRecordCount = 0
 
+--========================================================
+-- SAFE JSON VALUE CONVERTER
+--========================================================
 
--- Safely convert Roblox/Lua values into JSON-safe values
 local function safeJSONValue(value, depth)
-	depth = depth or 0
+    depth = depth or 0
 
-	-- Prevent extremely deep / circular tables
-	if depth > 10 then
-		return {
-			type = "table",
-			value = "<max depth reached>"
-		}
-	end
+    if depth > 10 then
+        return {
+            type = "table",
+            value = "<maximum depth reached>"
+        }
+    end
 
-	local valueType = typeof(value)
+    local valueType = typeof(value)
 
-	if valueType == "nil"
-		or valueType == "string"
-		or valueType == "boolean" then
+    if value == nil then
+        return nil
 
-		return value
+    elseif valueType == "string" then
+        return value
 
-	elseif valueType == "number" then
+    elseif valueType == "boolean" then
+        return value
 
-		-- JSON cannot represent NaN or infinity
-		if value ~= value
-			or value == math.huge
-			or value == -math.huge then
+    elseif valueType == "number" then
+        if value ~= value then
+            return "NaN"
+        elseif value == math.huge then
+            return "Infinity"
+        elseif value == -math.huge then
+            return "-Infinity"
+        end
 
-			return {
-				type = "number",
-				value = tostring(value)
-			}
-		end
+        return value
 
-		return value
+    elseif valueType == "Vector3" then
+        return {
+            type = "Vector3",
+            x = value.X,
+            y = value.Y,
+            z = value.Z
+        }
 
-	elseif valueType == "Vector3" then
+    elseif valueType == "Vector2" then
+        return {
+            type = "Vector2",
+            x = value.X,
+            y = value.Y
+        }
 
-		return {
-			type = "Vector3",
-			X = value.X,
-			Y = value.Y,
-			Z = value.Z
-		}
+    elseif valueType == "Color3" then
+        return {
+            type = "Color3",
+            r = value.R,
+            g = value.G,
+            b = value.B
+        }
 
-	elseif valueType == "Vector2" then
+    elseif valueType == "CFrame" then
+        return {
+            type = "CFrame",
+            components = {value:GetComponents()}
+        }
 
-		return {
-			type = "Vector2",
-			X = value.X,
-			Y = value.Y
-		}
+    elseif valueType == "UDim2" then
+        return {
+            type = "UDim2",
+            xScale = value.X.Scale,
+            xOffset = value.X.Offset,
+            yScale = value.Y.Scale,
+            yOffset = value.Y.Offset
+        }
 
-	elseif valueType == "Color3" then
+    elseif valueType == "UDim" then
+        return {
+            type = "UDim",
+            scale = value.Scale,
+            offset = value.Offset
+        }
 
-		return {
-			type = "Color3",
-			R = value.R,
-			G = value.G,
-			B = value.B
-		}
+    elseif valueType == "BrickColor" then
+        return {
+            type = "BrickColor",
+            number = value.Number,
+            name = value.Name
+        }
 
-	elseif valueType == "CFrame" then
+    elseif valueType == "EnumItem" then
+        return {
+            type = "EnumItem",
+            enumType = tostring(value.EnumType),
+            name = value.Name,
+            value = value.Value
+        }
 
-		local components = {value:GetComponents()}
+    elseif valueType == "Instance" then
+        local path = "<unavailable>"
 
-		return {
-			type = "CFrame",
-			components = components
-		}
+        pcall(function()
+            path = getPath(value)
+        end)
 
-	elseif valueType == "UDim2" then
+        return {
+            type = "Instance",
+            name = value.Name,
+            className = value.ClassName,
+            path = path
+        }
 
-		return {
-			type = "UDim2",
+    elseif valueType == "table" then
+        local result = {}
 
-			X = {
-				Scale = value.X.Scale,
-				Offset = value.X.Offset
-			},
+        for key, item in pairs(value) do
+            local safeKey = tostring(key)
 
-			Y = {
-				Scale = value.Y.Scale,
-				Offset = value.Y.Offset
-			}
-		}
+            local ok, safeValue = pcall(function()
+                return safeJSONValue(item, depth + 1)
+            end)
 
-	elseif valueType == "UDim" then
+            if ok then
+                result[safeKey] = safeValue
+            else
+                result[safeKey] = {
+                    type = "error",
+                    value = tostring(safeValue)
+                }
+            end
+        end
 
-		return {
-			type = "UDim",
-			Scale = value.Scale,
-			Offset = value.Offset
-		}
+        return result
 
-	elseif valueType == "BrickColor" then
+    else
+        -- Unknown/non-JSON Roblox values are converted to text
+        -- instead of being passed directly to JSONEncode.
+        return {
+            type = valueType,
+            value = tostring(value)
+        }
+    end
+end
 
-		return {
-			type = "BrickColor",
-			Name = value.Name,
-			Number = value.Number
-		}
+--========================================================
+-- REQUEST FUNCTION
+--========================================================
 
-	elseif valueType == "EnumItem" then
+local function getRequestFunction()
 
-		return {
-			type = "EnumItem",
-			enum = tostring(value.EnumType),
-			name = value.Name,
-			value = value.Value
-		}
+    if syn and syn.request then
+        return syn.request
+    end
 
-	elseif valueType == "Instance" then
+    if http_request then
+        return http_request
+    end
 
-		local path = "<unknown>"
+    if request then
+        return request
+    end
 
-		pcall(function()
-			path = getPath(value)
-		end)
+    if fluxus and fluxus.request then
+        return fluxus.request
+    end
 
-		return {
-			type = "Instance",
-			name = value.Name,
-			className = value.ClassName,
-			path = path
-		}
+    return nil
+end
 
-	elseif valueType == "table" then
+--========================================================
+-- DISCORD UPLOAD
+--========================================================
 
-		local result = {}
+local function uploadJSONToDiscord(jsonData, fileName, recordCount)
 
-		for key, item in pairs(value) do
+    if DISCORD_WEBHOOK_URL == ""
+        or DISCORD_WEBHOOK_URL == "PASTE_YOUR_WEBHOOK_URL_HERE" then
 
-			local safeKey = tostring(key)
+        return false,
+            "Discord webhook URL has not been configured."
+    end
 
-			local success, converted = pcall(function()
-				return safeJSONValue(item, depth + 1)
-			end)
+    local requestFunction = getRequestFunction()
 
-			if success then
-				result[safeKey] = converted
-			else
-				result[safeKey] = {
-					type = "error",
-					value = tostring(converted)
-				}
-			end
-		end
+    if not requestFunction then
+        return false,
+            "No supported HTTP request function found."
+    end
 
-		return result
-	end
+    local boundary =
+        "----RobloxInspectorBoundary" ..
+        tostring(math.random(100000, 999999))
 
-	-- IMPORTANT:
-	-- Never pass an unknown Roblox datatype directly to JSONEncode.
-	return {
-		type = valueType,
-		value = tostring(value)
-	}
+    local payload = HttpService:JSONEncode({
+        username = "Roblox Client Inspector",
+
+        content =
+            "Roblox JSON export\n" ..
+            "Records: " ..
+            tostring(recordCount)
+    })
+
+    local body = ""
+
+    body = body ..
+        "--" .. boundary .. "\r\n" ..
+        "Content-Disposition: form-data; name=\"payload_json\"\r\n" ..
+        "Content-Type: application/json\r\n\r\n" ..
+        payload ..
+        "\r\n"
+
+    body = body ..
+        "--" .. boundary .. "\r\n" ..
+        "Content-Disposition: form-data; name=\"files[0]\"; filename=\"" ..
+        fileName ..
+        "\"\r\n" ..
+        "Content-Type: application/json\r\n\r\n" ..
+        jsonData ..
+        "\r\n"
+
+    body = body ..
+        "--" .. boundary .. "--\r\n"
+
+    local ok, response = pcall(function()
+
+        return requestFunction({
+            Url = DISCORD_WEBHOOK_URL,
+
+            Method = "POST",
+
+            Headers = {
+                ["Content-Type"] =
+                    "multipart/form-data; boundary=" ..
+                    boundary
+            },
+
+            Body = body
+        })
+
+    end)
+
+    if not ok then
+        return false, tostring(response)
+    end
+
+    if not response then
+        return false, "No response received from Discord."
+    end
+
+    local statusCode =
+        response.StatusCode or
+        response.Status or
+        0
+
+    if statusCode >= 200 and statusCode < 300 then
+        return true, "Upload successful."
+    end
+
+    local responseBody =
+        response.Body or
+        response.body or
+        tostring(response)
+
+    return false,
+        "Discord returned HTTP " ..
+        tostring(statusCode) ..
+        ": " ..
+        tostring(responseBody)
+end
+
+--========================================================
+-- ASYNC JSON GENERATOR
+--========================================================
+
+local function buildJSONAsync(updateStatus)
+
+    local snapshot = {}
+
+    -- Take a snapshot of everything currently scanned.
+    for instance in pairs(scanned) do
+        table.insert(snapshot, instance)
+    end
+
+    -- Sort by path.
+    table.sort(snapshot, function(a, b)
+
+        local pathA = ""
+        local pathB = ""
+
+        pcall(function()
+            pathA = getPath(a)
+        end)
+
+        pcall(function()
+            pathB = getPath(b)
+        end)
+
+        return pathA < pathB
+    end)
+
+    local encodedEntries = {}
+
+    local total = #snapshot
+    local processed = 0
+    local failed = 0
+
+    for _, instance in ipairs(snapshot) do
+
+        if jsonCancelRequested then
+            return nil, "Export cancelled."
+        end
+
+        local ok, encoded = pcall(function()
+
+            local attributes = {}
+
+            local attrOK, attrData = pcall(function()
+                return getAttributes(instance)
+            end)
+
+            if attrOK and type(attrData) == "table" then
+
+                for attributeName, attributeValue in pairs(attrData) do
+
+                    local valueOK, safeValue =
+                        pcall(function()
+                            return safeJSONValue(attributeValue)
+                        end)
+
+                    if valueOK then
+
+                        attributes[tostring(attributeName)] =
+                            safeValue
+
+                    else
+
+                        attributes[tostring(attributeName)] = {
+                            type = "error",
+                            value = tostring(safeValue)
+                        }
+
+                    end
+                end
+            end
+
+            local path = "<unavailable>"
+
+            pcall(function()
+                path = getPath(instance)
+            end)
+
+            local record = {
+                name = instance.Name,
+                className = instance.ClassName,
+                path = path,
+                attributes = attributes
+            }
+
+            return HttpService:JSONEncode(record)
+        end)
+
+        if ok then
+
+            table.insert(encodedEntries, encoded)
+
+        else
+
+            failed += 1
+
+            local errorRecord = {
+                name = "<export error>",
+                className = "<unknown>",
+                path = "<unavailable>",
+                attributes = {},
+                exportError = tostring(encoded)
+            }
+
+            local errorEncoded =
+                HttpService:JSONEncode(errorRecord)
+
+            table.insert(
+                encodedEntries,
+                errorEncoded
+            )
+        end
+
+        processed += 1
+
+        if updateStatus then
+            updateStatus(
+                processed,
+                total,
+                failed
+            )
+        end
+
+        -- Yield regularly so Roblox does not appear frozen.
+        if processed % JSON_BATCH_SIZE == 0 then
+            task.wait()
+        end
+    end
+
+    local finalJSON =
+        "[" ..
+        table.concat(encodedEntries, ",") ..
+        "]"
+
+    return finalJSON, {
+        total = total,
+        failed = failed
+    }
+end
+
+--========================================================
+-- JSON WINDOW
+--========================================================
+
+local function showJSON()
+
+    if jsonGenerating then
+        return
+    end
+
+    jsonCancelRequested = false
+    fullJSON = ""
+    jsonRecordCount = 0
+    jsonGenerating = true
+
+    --====================================================
+    -- WINDOW
+    --====================================================
+
+    local jsonGui = Instance.new("Frame")
+
+    jsonGui.Name = "JSONExportWindow"
+
+    jsonGui.Size =
+        UDim2.new(0, 750, 0, 500)
+
+    jsonGui.Position =
+        UDim2.new(0.5, -375, 0.5, -250)
+
+    jsonGui.BackgroundColor3 =
+        Color3.fromRGB(25, 25, 25)
+
+    jsonGui.BorderSizePixel = 0
+    jsonGui.ZIndex = 100
+    jsonGui.Parent = screenGui
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = jsonGui
+
+    --====================================================
+    -- TITLE
+    --====================================================
+
+    local title = Instance.new("TextLabel")
+
+    title.Size =
+        UDim2.new(1, -150, 0, 40)
+
+    title.Position =
+        UDim2.new(0, 15, 0, 5)
+
+    title.BackgroundTransparency = 1
+    title.Text = "JSON Export"
+
+    title.TextColor3 =
+        Color3.new(1, 1, 1)
+
+    title.TextSize = 20
+    title.Font =
+        Enum.Font.SourceSansBold
+
+    title.TextXAlignment =
+        Enum.TextXAlignment.Left
+
+    title.ZIndex = 101
+    title.Parent = jsonGui
+
+    --====================================================
+    -- CLOSE
+    --====================================================
+
+    local closeButton =
+        Instance.new("TextButton")
+
+    closeButton.Size =
+        UDim2.new(0, 35, 0, 30)
+
+    closeButton.Position =
+        UDim2.new(1, -45, 0, 10)
+
+    closeButton.BackgroundColor3 =
+        Color3.fromRGB(170, 50, 50)
+
+    closeButton.Text = "X"
+
+    closeButton.TextColor3 =
+        Color3.new(1, 1, 1)
+
+    closeButton.TextSize = 16
+
+    closeButton.Font =
+        Enum.Font.SourceSansBold
+
+    closeButton.ZIndex = 102
+    closeButton.Parent = jsonGui
+
+    closeButton.MouseButton1Click:Connect(function()
+
+        jsonCancelRequested = true
+        jsonGenerating = false
+
+        jsonGui:Destroy()
+
+    end)
+
+    --====================================================
+    -- STATUS
+    --====================================================
+
+    local statusLabel =
+        Instance.new("TextLabel")
+
+    statusLabel.Size =
+        UDim2.new(1, -30, 0, 25)
+
+    statusLabel.Position =
+        UDim2.new(0, 15, 0, 50)
+
+    statusLabel.BackgroundTransparency = 1
+    statusLabel.Text =
+        "Preparing JSON..."
+
+    statusLabel.TextColor3 =
+        Color3.new(1, 1, 1)
+
+    statusLabel.TextSize = 15
+
+    statusLabel.Font =
+        Enum.Font.SourceSans
+
+    statusLabel.TextXAlignment =
+        Enum.TextXAlignment.Left
+
+    statusLabel.ZIndex = 101
+    statusLabel.Parent = jsonGui
+
+    --====================================================
+    -- RECORD COUNT
+    --====================================================
+
+    local recordLabel =
+        Instance.new("TextLabel")
+
+    recordLabel.Size =
+        UDim2.new(0.5, -20, 0, 25)
+
+    recordLabel.Position =
+        UDim2.new(0, 15, 0, 78)
+
+    recordLabel.BackgroundTransparency = 1
+    recordLabel.Text = "Records: 0"
+
+    recordLabel.TextColor3 =
+        Color3.new(1, 1, 1)
+
+    recordLabel.TextSize = 14
+
+    recordLabel.Font =
+        Enum.Font.SourceSans
+
+    recordLabel.TextXAlignment =
+        Enum.TextXAlignment.Left
+
+    recordLabel.ZIndex = 101
+    recordLabel.Parent = jsonGui
+
+    --====================================================
+    -- SIZE
+    --====================================================
+
+    local sizeLabel =
+        Instance.new("TextLabel")
+
+    sizeLabel.Size =
+        UDim2.new(0.5, -20, 0, 25)
+
+    sizeLabel.Position =
+        UDim2.new(0.5, 0, 0, 78)
+
+    sizeLabel.BackgroundTransparency = 1
+    sizeLabel.Text = "JSON Size: 0 KB"
+
+    sizeLabel.TextColor3 =
+        Color3.new(1, 1, 1)
+
+    sizeLabel.TextSize = 14
+
+    sizeLabel.Font =
+        Enum.Font.SourceSans
+
+    sizeLabel.TextXAlignment =
+        Enum.TextXAlignment.Right
+
+    sizeLabel.ZIndex = 101
+    sizeLabel.Parent = jsonGui
+
+    --====================================================
+    -- PREVIEW
+    --====================================================
+
+    local previewBox =
+        Instance.new("TextBox")
+
+    previewBox.Size =
+        UDim2.new(1, -30, 1, -160)
+
+    previewBox.Position =
+        UDim2.new(0, 15, 0, 108)
+
+    previewBox.BackgroundColor3 =
+        Color3.fromRGB(15, 15, 15)
+
+    previewBox.TextColor3 =
+        Color3.new(1, 1, 1)
+
+    previewBox.TextSize = 13
+
+    previewBox.Font =
+        Enum.Font.Code
+
+    previewBox.TextXAlignment =
+        Enum.TextXAlignment.Left
+
+    previewBox.TextYAlignment =
+        Enum.TextYAlignment.Top
+
+    previewBox.TextWrapped = false
+    previewBox.MultiLine = true
+    previewBox.ClearTextOnFocus = false
+    previewBox.TextEditable = false
+
+    previewBox.Text =
+        "Generating JSON..."
+
+    previewBox.ZIndex = 101
+    previewBox.Parent = jsonGui
+
+    --====================================================
+    -- COPY
+    --====================================================
+
+    local copyButton =
+        Instance.new("TextButton")
+
+    copyButton.Size =
+        UDim2.new(0, 120, 0, 35)
+
+    copyButton.Position =
+        UDim2.new(0, 15, 1, -45)
+
+    copyButton.BackgroundColor3 =
+        Color3.fromRGB(60, 100, 170)
+
+    copyButton.Text = "Copy JSON"
+
+    copyButton.TextColor3 =
+        Color3.new(1, 1, 1)
+
+    copyButton.TextSize = 14
+
+    copyButton.Font =
+        Enum.Font.SourceSansBold
+
+    copyButton.ZIndex = 102
+    copyButton.Parent = jsonGui
+
+    copyButton.MouseButton1Click:Connect(function()
+
+        if fullJSON == "" then
+            return
+        end
+
+        if setclipboard then
+
+            local ok =
+                pcall(function()
+                    setclipboard(fullJSON)
+                end)
+
+            if ok then
+
+                copyButton.Text = "Copied!"
+
+                task.delay(1.5, function()
+
+                    if copyButton.Parent then
+                        copyButton.Text =
+                            "Copy JSON"
+                    end
+
+                end)
+
+                return
+            end
+        end
+
+        -- Fallback if clipboard API isn't available.
+        previewBox.Text = fullJSON
+        previewBox.TextEditable = true
+        previewBox:CaptureFocus()
+
+    end)
+
+    --====================================================
+    -- DISCORD BUTTON
+    --====================================================
+
+    local discordButton =
+        Instance.new("TextButton")
+
+    discordButton.Size =
+        UDim2.new(0, 150, 0, 35)
+
+    discordButton.Position =
+        UDim2.new(0, 145, 1, -45)
+
+    discordButton.BackgroundColor3 =
+        Color3.fromRGB(80, 80, 180)
+
+    discordButton.Text =
+        "Upload to Discord"
+
+    discordButton.TextColor3 =
+        Color3.new(1, 1, 1)
+
+    discordButton.TextSize = 14
+
+    discordButton.Font =
+        Enum.Font.SourceSansBold
+
+    discordButton.ZIndex = 102
+    discordButton.Parent = jsonGui
+
+    discordButton.MouseButton1Click:Connect(function()
+
+        if fullJSON == "" then
+
+            discordButton.Text =
+                "Generate First"
+
+            return
+        end
+
+        if jsonGenerating then
+
+            discordButton.Text =
+                "Still Generating"
+
+            return
+        end
+
+        discordButton.Text =
+            "Uploading..."
+
+        discordButton.Active = false
+
+        task.spawn(function()
+
+            local timestamp =
+                os.date("%Y-%m-%d_%H-%M-%S")
+
+            local fileName =
+                "roblox_export_" ..
+                timestamp ..
+                ".json"
+
+            -- IMPORTANT:
+            -- Uses the global jsonRecordCount.
+            -- No out-of-scope snapshot variable.
+            local success, message =
+                uploadJSONToDiscord(
+                    fullJSON,
+                    fileName,
+                    jsonRecordCount
+                )
+
+            if success then
+
+                discordButton.Text =
+                    "Uploaded!"
+
+                statusLabel.Text =
+                    message
+
+            else
+
+                discordButton.Text =
+                    "Upload Failed"
+
+                statusLabel.Text =
+                    tostring(message)
+
+            end
+
+            task.delay(2, function()
+
+                if discordButton.Parent then
+
+                    discordButton.Text =
+                        "Upload to Discord"
+
+                    discordButton.Active = true
+
+                end
+
+            end)
+
+        end)
+
+    end)
+
+    --====================================================
+    -- CANCEL
+    --====================================================
+
+    local cancelButton =
+        Instance.new("TextButton")
+
+    cancelButton.Size =
+        UDim2.new(0, 100, 0, 35)
+
+    cancelButton.Position =
+        UDim2.new(1, -115, 1, -45)
+
+    cancelButton.BackgroundColor3 =
+        Color3.fromRGB(130, 70, 50)
+
+    cancelButton.Text = "Cancel"
+
+    cancelButton.TextColor3 =
+        Color3.new(1, 1, 1)
+
+    cancelButton.TextSize = 14
+
+    cancelButton.Font =
+        Enum.Font.SourceSansBold
+
+    cancelButton.ZIndex = 102
+    cancelButton.Parent = jsonGui
+
+    cancelButton.MouseButton1Click:Connect(function()
+
+        jsonCancelRequested = true
+
+        statusLabel.Text =
+            "Cancelling..."
+
+        cancelButton.Active = false
+
+    end)
+
+    --====================================================
+    -- START GENERATION
+    --====================================================
+
+    task.spawn(function()
+
+        local result, info =
+            buildJSONAsync(function(
+                processed,
+                total,
+                failed
+            )
+
+                if not jsonGui.Parent then
+                    jsonCancelRequested = true
+                    return
+                end
+
+                recordLabel.Text =
+                    "Records: " ..
+                    tostring(processed) ..
+                    " / " ..
+                    tostring(total)
+
+                if failed > 0 then
+
+                    statusLabel.Text =
+                        "Generating... " ..
+                        tostring(processed) ..
+                        " / " ..
+                        tostring(total) ..
+                        " | Errors: " ..
+                        tostring(failed)
+
+                else
+
+                    statusLabel.Text =
+                        "Generating... " ..
+                        tostring(processed) ..
+                        " / " ..
+                        tostring(total)
+
+                end
+
+            end)
+
+        jsonGenerating = false
+
+        --================================================
+        -- FAILED / CANCELLED
+        --================================================
+
+        if not result then
+
+            if jsonGui.Parent then
+
+                statusLabel.Text =
+                    tostring(info)
+
+                previewBox.Text =
+                    tostring(info)
+
+            end
+
+            return
+        end
+
+        --================================================
+        -- STORE COMPLETE JSON
+        --================================================
+
+        fullJSON = result
+
+        jsonRecordCount =
+            info.total or 0
+
+        --================================================
+        -- PREVIEW FIRST 25 RECORDS
+        --================================================
+
+        local previewEntries = {}
+
+        local decodeOK, decoded =
+            pcall(function()
+                return HttpService:JSONDecode(result)
+            end)
+
+        if decodeOK and type(decoded) == "table" then
+
+            for i = 1,
+                math.min(
+                    #decoded,
+                    JSON_PREVIEW_RECORDS
+                ) do
+
+                local encodeOK, preview =
+                    pcall(function()
+
+                        return HttpService:JSONEncode(
+                            decoded[i]
+                        )
+
+                    end)
+
+                if encodeOK then
+                    table.insert(
+                        previewEntries,
+                        preview
+                    )
+                end
+
+            end
+        end
+
+        previewBox.Text =
+            "[" ..
+            table.concat(
+                previewEntries,
+                ",\n"
+            ) ..
+            "]"
+
+        --================================================
+        -- FINAL SIZE
+        --================================================
+
+        local byteSize =
+            #fullJSON
+
+        local sizeKB =
+            byteSize / 1024
+
+        recordLabel.Text =
+            "Records: " ..
+            tostring(jsonRecordCount)
+
+        sizeLabel.Text =
+            string.format(
+                "JSON Size: %.2f KB",
+                sizeKB
+            )
+
+        if info.failed and info.failed > 0 then
+
+            statusLabel.Text =
+                "Complete — " ..
+                tostring(info.failed) ..
+                " record(s) had export errors."
+
+        else
+
+            statusLabel.Text =
+                "Complete — ready to upload."
+
+        end
+
+    end)
 end
 
 
