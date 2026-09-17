@@ -60,8 +60,7 @@ local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "ClientInspector"
 screenGui.ResetOnSpawn = false
 screenGui.IgnoreGuiInset = true
-screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
-screenGui.DisplayOrder = 999
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screenGui.Parent = playerGui
 
 ------------------------------------------------------------
@@ -77,7 +76,7 @@ toggleButton.Position = UDim2.new(0.5, -27, 0.5, -27)
 
 toggleButton.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
 toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-toggleButton.Text = "🔎"
+toggleButton.Text = "Open"
 toggleButton.TextSize = 24
 toggleButton.BorderSizePixel = 0
 toggleButton.AutoButtonColor = true
@@ -99,14 +98,13 @@ toggleStroke.Parent = toggleButton
 
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "InspectorWindow"
-mainFrame.Size = UDim2.fromOffset(360, 450)
-mainFrame.Position = UDim2.new(0.5, -180, 0.5, -225)
-mainFrame.AnchorPoint = Vector2.new(0, 0)
+mainFrame.Size = UDim2.fromOffset(720, 500)
+mainFrame.Position = UDim2.new(0.5, -360, 0.5, -250)
 
 mainFrame.BackgroundColor3 = Color3.fromRGB(24, 24, 24)
 mainFrame.BorderSizePixel = 0
 mainFrame.Visible = false
-mainFrame.ZIndex = 100
+mainFrame.ZIndex = 10
 mainFrame.Parent = screenGui
 
 local mainCorner = Instance.new("UICorner")
@@ -118,47 +116,6 @@ mainStroke.Thickness = 1
 mainStroke.Color = Color3.fromRGB(70, 70, 70)
 mainStroke.Parent = mainFrame
 
-local mainSizeConstraint = Instance.new("UISizeConstraint")
-mainSizeConstraint.MinSize = Vector2.new(280, 220)
-mainSizeConstraint.MaxSize = Vector2.new(720, 500)
-mainSizeConstraint.Parent = mainFrame
-
-
-------------------------------------------------------------
--- RESPONSIVE PANEL SIZE
-------------------------------------------------------------
-
-local function updatePanelSize()
-    local camera = workspace.CurrentCamera
-    if not camera then
-        return
-    end
-
-    local viewport = camera.ViewportSize
-    local isMobile = viewport.X <= 600
-
-    local width
-    local height
-
-    if isMobile then
-        -- Keep the inspector as a small overlay on phone screens.
-        width = math.min(380, math.max(280, viewport.X - 20))
-        height = math.min(500, math.max(300, viewport.Y - 120))
-    else
-        width = math.min(720, math.max(420, viewport.X - 40))
-        height = math.min(500, math.max(320, viewport.Y - 80))
-    end
-
-    mainFrame.Size = UDim2.fromOffset(width, height)
-    mainFrame.Position = UDim2.new(0.5, -width / 2, 0.5, -height / 2)
-end
-
-updatePanelSize()
-
-if workspace.CurrentCamera then
-    workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updatePanelSize)
-end
-
 ------------------------------------------------------------
 -- TITLE BAR
 ------------------------------------------------------------
@@ -168,7 +125,7 @@ titleBar.Name = "TitleBar"
 titleBar.Size = UDim2.new(1, 0, 0, 42)
 titleBar.BackgroundColor3 = Color3.fromRGB(32, 32, 32)
 titleBar.BorderSizePixel = 0
-titleBar.ZIndex = 101
+titleBar.ZIndex = 11
 titleBar.Parent = mainFrame
 
 local titleCorner = Instance.new("UICorner")
@@ -185,7 +142,7 @@ titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 titleLabel.TextSize = 18
 titleLabel.Font = Enum.Font.GothamBold
 titleLabel.TextXAlignment = Enum.TextXAlignment.Left
-titleLabel.ZIndex = 102
+titleLabel.ZIndex = 12
 titleLabel.Parent = titleBar
 
 ------------------------------------------------------------
@@ -194,8 +151,8 @@ titleLabel.Parent = titleBar
 
 local searchBox = Instance.new("TextBox")
 searchBox.Name = "Search"
-searchBox.Size = UDim2.new(0, 200, 0, 32)
-searchBox.Position = UDim2.new(1, -255, 0, 5)
+searchBox.Size = UDim2.new(0, 260, 0, 32)
+searchBox.Position = UDim2.new(1, -275, 0, 5)
 
 searchBox.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
 searchBox.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -206,26 +163,29 @@ searchBox.TextSize = 14
 searchBox.Font = Enum.Font.Gotham
 searchBox.ClearTextOnFocus = false
 searchBox.BorderSizePixel = 0
-searchBox.ZIndex = 103
+searchBox.ZIndex = 13
 searchBox.Parent = titleBar
 
 local searchCorner = Instance.new("UICorner")
 searchCorner.CornerRadius = UDim.new(0, 5)
 searchCorner.Parent = searchBox
 
--- Close button: always visible inside the panel so mobile users can close it
+------------------------------------------------------------
+-- CLOSE BUTTON
+------------------------------------------------------------
+
 local closeButton = Instance.new("TextButton")
 closeButton.Name = "CloseButton"
-closeButton.Size = UDim2.fromOffset(35, 32)
+closeButton.Size = UDim2.fromOffset(34, 32)
 closeButton.Position = UDim2.new(1, -42, 0, 5)
 closeButton.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
 closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-closeButton.Text = "✕"
+closeButton.Text = "X"
 closeButton.TextSize = 16
 closeButton.Font = Enum.Font.GothamBold
 closeButton.BorderSizePixel = 0
 closeButton.AutoButtonColor = true
-closeButton.ZIndex = 104
+closeButton.ZIndex = 14
 closeButton.Parent = titleBar
 
 local closeCorner = Instance.new("UICorner")
@@ -234,7 +194,7 @@ closeCorner.Parent = closeButton
 
 closeButton.MouseButton1Click:Connect(function()
     mainFrame.Visible = false
-    toggleButton.Text = "🔎"
+    toggleButton.Text = "Open"
 end)
 
 ------------------------------------------------------------
@@ -246,7 +206,7 @@ toolbar.Name = "Toolbar"
 toolbar.Size = UDim2.new(1, -20, 0, 40)
 toolbar.Position = UDim2.fromOffset(10, 48)
 toolbar.BackgroundTransparency = 1
-toolbar.ZIndex = 101
+toolbar.ZIndex = 11
 toolbar.Parent = mainFrame
 
 local function createButton(name, text, position, width)
@@ -264,7 +224,7 @@ local function createButton(name, text, position, width)
     button.Font = Enum.Font.Gotham
 
     button.BorderSizePixel = 0
-    button.ZIndex = 102
+    button.ZIndex = 12
     button.Parent = toolbar
 
     local corner = Instance.new("UICorner")
@@ -317,7 +277,7 @@ statusLabel.Text = "Ready"
 statusLabel.TextSize = 13
 statusLabel.Font = Enum.Font.Gotham
 statusLabel.TextXAlignment = Enum.TextXAlignment.Left
-statusLabel.ZIndex = 102
+statusLabel.ZIndex = 12
 statusLabel.Parent = toolbar
 
 ------------------------------------------------------------
@@ -331,7 +291,7 @@ treeFrame.Position = UDim2.fromOffset(10, 95)
 
 treeFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 treeFrame.BorderSizePixel = 0
-treeFrame.ZIndex = 101
+treeFrame.ZIndex = 11
 treeFrame.Parent = mainFrame
 
 local treeCorner = Instance.new("UICorner")
@@ -354,7 +314,7 @@ treeScroll.ScrollBarThickness = 6
 treeScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 treeScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
 
-treeScroll.ZIndex = 102
+treeScroll.ZIndex = 12
 treeScroll.Parent = treeFrame
 
 local treeLayout = Instance.new("UIListLayout")
@@ -373,7 +333,7 @@ detailsFrame.Position = UDim2.new(0.52, 5, 0, 95)
 
 detailsFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 detailsFrame.BorderSizePixel = 0
-detailsFrame.ZIndex = 101
+detailsFrame.ZIndex = 11
 detailsFrame.Parent = mainFrame
 
 local detailsCorner = Instance.new("UICorner")
@@ -395,7 +355,7 @@ detailsScroll.BorderSizePixel = 0
 detailsScroll.ScrollBarThickness = 6
 detailsScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
 
-detailsScroll.ZIndex = 102
+detailsScroll.ZIndex = 12
 detailsScroll.Parent = detailsFrame
 
 local detailsLayout = Instance.new("UIListLayout")
@@ -403,9 +363,8 @@ detailsLayout.SortOrder = Enum.SortOrder.LayoutOrder
 detailsLayout.Padding = UDim.new(0, 5)
 detailsLayout.Parent = detailsScroll
 
-
 ------------------------------------------------------------
--- RESPONSIVE MOBILE LAYOUT
+-- MOBILE LAYOUT
 ------------------------------------------------------------
 
 local function updateMobileLayout()
@@ -414,22 +373,29 @@ local function updateMobileLayout()
         return
     end
 
-    local mobile = camera.ViewportSize.X <= 600
+    local viewport = camera.ViewportSize
+    local mobile = viewport.X <= 600
 
     if mobile then
-        searchBox.Size = UDim2.new(0, 90, 0, 30)
-        searchBox.Position = UDim2.new(1, -132, 0, 6)
-        titleLabel.Size = UDim2.new(1, -145, 1, 0)
-        statusLabel.Visible = false
-        treeFrame.Size = UDim2.new(0.5, -15, 1, -105)
-        detailsFrame.Size = UDim2.new(0.5, -15, 1, -105)
+        local width = math.max(300, math.min(380, viewport.X - 16))
+        local height = math.max(300, math.min(520, viewport.Y - 32))
+
+        mainFrame.Size = UDim2.fromOffset(width, height)
+        mainFrame.Position = UDim2.new(0.5, -width / 2, 0.5, -height / 2)
+
+        searchBox.Size = UDim2.fromOffset(math.max(60, width - 145), 32)
+        searchBox.Position = UDim2.new(1, -143, 0, 5)
+        titleLabel.Size = UDim2.new(1, -150, 1, 0)
     else
-        searchBox.Size = UDim2.new(0, 200, 0, 32)
-        searchBox.Position = UDim2.new(1, -255, 0, 5)
+        local width = math.min(720, viewport.X - 40)
+        local height = math.min(500, viewport.Y - 80)
+
+        mainFrame.Size = UDim2.fromOffset(math.max(420, width), math.max(320, height))
+        mainFrame.Position = UDim2.new(0.5, -mainFrame.AbsoluteSize.X / 2, 0.5, -mainFrame.AbsoluteSize.Y / 2)
+
+        searchBox.Size = UDim2.fromOffset(260, 32)
+        searchBox.Position = UDim2.new(1, -275, 0, 5)
         titleLabel.Size = UDim2.new(1, -20, 1, 0)
-        statusLabel.Visible = true
-        treeFrame.Size = UDim2.new(0.52, -15, 1, -105)
-        detailsFrame.Size = UDim2.new(0.48, -15, 1, -105)
     end
 end
 
@@ -655,7 +621,7 @@ local function addDetail(text, height)
     label.TextWrapped = true
     label.BorderSizePixel = 0
 
-    label.ZIndex = 103
+    label.ZIndex = 13
     label.Parent = detailsScroll
 
     local padding = Instance.new("UIPadding")
@@ -766,7 +732,7 @@ local function createNode(instance, depth)
     button.TextXAlignment = Enum.TextXAlignment.Left
     button.AutoButtonColor = true
 
-    button.ZIndex = 103
+    button.ZIndex = 13
     button.Parent = treeScroll
 
     local arrow = ""
@@ -814,7 +780,7 @@ end
 
 ------------------------------------------------------------
 
-rebuildTree = function()
+function rebuildTree()
     clearTree()
 
     createNode(game, 0)
@@ -958,22 +924,13 @@ local function showJSON()
     local jsonGui = Instance.new("Frame")
     jsonGui.Name = "JSONWindow"
 
-    jsonGui.Size = UDim2.fromOffset(360, 450)
-    jsonGui.Position = UDim2.new(0.5, -180, 0.5, -225)
+    jsonGui.Size = UDim2.fromOffset(750, 500)
+    jsonGui.Position = UDim2.new(0.5, -375, 0.5, -250)
 
     jsonGui.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
     jsonGui.BorderSizePixel = 0
     jsonGui.ZIndex = 30
     jsonGui.Parent = screenGui
-
-    local jsonCamera = workspace.CurrentCamera
-    if jsonCamera and jsonCamera.ViewportSize.X <= 600 then
-        local v = jsonCamera.ViewportSize
-        local w = math.min(380, math.max(280, v.X - 20))
-        local h = math.min(500, math.max(300, v.Y - 120))
-        jsonGui.Size = UDim2.fromOffset(w, h)
-        jsonGui.Position = UDim2.new(0.5, -w / 2, 0.5, -h / 2)
-    end
 
     local corner = Instance.new("UICorner")
     corner.CornerRadius = UDim.new(0, 8)
@@ -1202,9 +1159,9 @@ toggleButton.MouseButton1Click:Connect(function()
     mainFrame.Visible = not mainFrame.Visible
 
     if mainFrame.Visible then
-        toggleButton.Text = "✕"
+        toggleButton.Text = "Close"
     else
-        toggleButton.Text = "🔎"
+        toggleButton.Text = "Open"
     end
 end)
 
