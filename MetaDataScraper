@@ -60,8 +60,9 @@ local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "ClientInspector"
 screenGui.ResetOnSpawn = false
 screenGui.IgnoreGuiInset = true
-screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-screenGui.DisplayOrder = 2147483647 -- Put inspector ScreenGui above other game ScreenGuis
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+screenGui.DisplayOrder = 2147483647
+screenGui.DisplayOrder = 10000 -- Keep inspector above other game ScreenGuis
 screenGui.Parent = playerGui
 
 ------------------------------------------------------------
@@ -874,6 +875,82 @@ end
 
 ------------------------------------------------------------
 
+------------------------------------------------------------
+-- COPY / EXPORT HELPERS
+------------------------------------------------------------
+
+local function copyToClipboard(text)
+    local copied = false
+
+    pcall(function()
+        if typeof(setclipboard) == "function" then
+            setclipboard(text)
+            copied = true
+        elseif typeof(toclipboard) == "function" then
+            toclipboard(text)
+            copied = true
+        elseif typeof(set_clipboard) == "function" then
+            set_clipboard(text)
+            copied = true
+        end
+    end)
+
+    return copied
+end
+
+local function buildReadableScan()
+    local output = {}
+    local instances = {}
+
+    for instance in pairs(scanned) do
+        table.insert(instances, instance)
+    end
+
+    table.sort(instances, function(a, b)
+        return getPath(a) < getPath(b)
+    end)
+
+    table.insert(output, "ROBLOX CLIENT INSPECTION")
+    table.insert(output, "========================")
+    table.insert(output, "Instances: " .. tostring(instanceCount))
+    table.insert(output, "Attributes: " .. tostring(attributeCount))
+    table.insert(output, "")
+
+    for _, instance in ipairs(instances) do
+        table.insert(output, "Instance: " .. instance.Name)
+        table.insert(output, "ClassName: " .. instance.ClassName)
+        table.insert(output, "Path: " .. getPath(instance))
+
+        local attributes = getAttributes(instance)
+        local attributeNames = {}
+
+        for name in pairs(attributes) do
+            table.insert(attributeNames, name)
+        end
+
+        table.sort(attributeNames)
+
+        if #attributeNames > 0 then
+            table.insert(output, "Attributes:")
+            for _, name in ipairs(attributeNames) do
+                table.insert(output, "  " .. name .. " = " .. tostring(serializeValue(attributes[name])))
+            end
+        else
+            table.insert(output, "Attributes: None")
+        end
+
+        local children = {}
+        pcall(function()
+            children = instance:GetChildren()
+        end)
+
+        table.insert(output, "Children: " .. tostring(#children))
+        table.insert(output, "")
+    end
+
+    return table.concat(output, "\n")
+end
+
 local function showJSON()
     local json = buildJSON()
 
@@ -897,7 +974,7 @@ local function showJSON()
     title.Position = UDim2.fromOffset(10, 0)
 
     title.BackgroundTransparency = 1
-    title.Text = "JSON Export"
+    title.Text = "JSON Export - Copy or Save"
     title.TextColor3 = Color3.fromRGB(255, 255, 255)
     title.TextSize = 17
     title.Font = Enum.Font.GothamBold
@@ -925,6 +1002,38 @@ local function showJSON()
         jsonGui:Destroy()
     end)
 
+    local copyJson = Instance.new("TextButton")
+    copyJson.Size = UDim2.fromOffset(95, 30)
+    copyJson.Position = UDim2.new(1, -145, 0, 5)
+    copyJson.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+    copyJson.TextColor3 = Color3.fromRGB(255, 255, 255)
+    copyJson.Text = "Copy JSON"
+    copyJson.TextSize = 13
+    copyJson.Font = Enum.Font.Gotham
+    copyJson.BorderSizePixel = 0
+    copyJson.ZIndex = 31
+    copyJson.Parent = jsonGui
+
+    local copyCorner = Instance.new("UICorner")
+    copyCorner.CornerRadius = UDim.new(0, 5)
+    copyCorner.Parent = copyJson
+
+    local copyReadable = Instance.new("TextButton")
+    copyReadable.Size = UDim2.fromOffset(105, 30)
+    copyReadable.Position = UDim2.new(1, -260, 0, 5)
+    copyReadable.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+    copyReadable.TextColor3 = Color3.fromRGB(255, 255, 255)
+    copyReadable.Text = "Copy All"
+    copyReadable.TextSize = 13
+    copyReadable.Font = Enum.Font.Gotham
+    copyReadable.BorderSizePixel = 0
+    copyReadable.ZIndex = 31
+    copyReadable.Parent = jsonGui
+
+    local readableCorner = Instance.new("UICorner")
+    readableCorner.CornerRadius = UDim.new(0, 5)
+    readableCorner.Parent = copyReadable
+
     local textBox = Instance.new("TextBox")
     textBox.Size = UDim2.new(1, -20, 1, -55)
     textBox.Position = UDim2.fromOffset(10, 45)
@@ -947,6 +1056,27 @@ local function showJSON()
 
     textBox.ZIndex = 31
     textBox.Parent = jsonGui
+
+    copyJson.MouseButton1Click:Connect(function()
+        if copyToClipboard(json) then
+            statusLabel.Text = "JSON copied to clipboard"
+        else
+            statusLabel.Text = "Clipboard unavailable - select and copy the JSON"
+            textBox:CaptureFocus()
+        end
+    end)
+
+    copyReadable.MouseButton1Click:Connect(function()
+        local readable = buildReadableScan()
+
+        if copyToClipboard(readable) then
+            statusLabel.Text = "All scan results copied to clipboard"
+        else
+            statusLabel.Text = "Clipboard unavailable - select and copy the text"
+            textBox.Text = readable
+            textBox:CaptureFocus()
+        end
+    end)
 end
 
 ------------------------------------------------------------
