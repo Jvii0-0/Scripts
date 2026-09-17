@@ -42,11 +42,6 @@ local YIELD_EVERY = 500
 local scanned = {}
 local expanded = {}
 local instanceMeta = {}
-local classCounts = {}
-local cachedTagCount = 0
-local cachedDepth = {}
-local cachedMaxDepth = 0
-
 local instanceCount = 0
 local attributeCount = 0
 
@@ -356,13 +351,6 @@ local jsonButton = createButton(
 "JSON",
 "JSON",
 UDim2.fromOffset(300, 0),
-70
-)
-
-local statsButton = createButton(
-"Stats",
-"Stats",
-UDim2.fromOffset(380, 0),
 70
 )
 
@@ -1589,9 +1577,6 @@ local function scanInstance(instance, generation)
         lowerAttributes = nil,
         lowerTags = nil,
     }
-    cachedDepth[instance] = depth
-    classCounts[instance.ClassName] = (classCounts[instance.ClassName] or 0) + 1
-    cachedTagCount += #tags
     attributeCount += attrCount
 
     if instanceCount % YIELD_EVERY == 0 then
@@ -1616,8 +1601,6 @@ local function scanInstance(instance, generation)
         end
     end
     meta.descendantCount = descendantCount
-    cachedDepth[instance] = depth
-    if depth > cachedMaxDepth then cachedMaxDepth = depth end
 end
 
 local function performScan()
@@ -1627,10 +1610,6 @@ local function performScan()
     local generation = scanGeneration
     scanned = {}
     instanceMeta = {}
-    classCounts = {}
-    cachedDepth = {}
-    cachedMaxDepth = 0
-    cachedTagCount = 0
     instanceCount = 0
     attributeCount = 0
     selectedInstance = nil
@@ -3583,74 +3562,6 @@ end
 
 
 --========================================================
--- STATS WINDOW
---========================================================
-local function showStats()
-    local existing = screenGui:FindFirstChild("InspectorStats")
-    if existing then existing:Destroy() return end
-
-    local camera = workspace.CurrentCamera
-    local vp = camera and camera.ViewportSize or Vector2.new(800, 600)
-    local w = math.max(280, math.min(520, vp.X - 24))
-    local h = math.max(260, math.min(600, vp.Y - 24))
-
-    local f = Instance.new("Frame")
-    f.Name = "InspectorStats"
-    f.Size = UDim2.fromOffset(w, h)
-    f.Position = UDim2.new(0.5, 0, 0.5, 0)
-    f.AnchorPoint = Vector2.new(0.5, 0.5)
-    f.BackgroundColor3 = THEME.bg
-    f.BorderSizePixel = 0
-    f.ZIndex = 25000
-    f.Parent = screenGui
-    round(f,10); stroke(f,THEME.stroke,0.05,1.2); gradient(f,90)
-
-    local hLabel = Instance.new("TextLabel",f)
-    hLabel.Size = UDim2.new(1,-62,0,32); hLabel.Position = UDim2.fromOffset(14,7); hLabel.BackgroundTransparency=1
-    hLabel.Text="EXPORT STATISTICS"; hLabel.TextColor3=THEME.text; hLabel.TextSize=15; hLabel.Font=Enum.Font.GothamBold
-    hLabel.TextXAlignment=Enum.TextXAlignment.Left; hLabel.TextTruncate=Enum.TextTruncate.AtEnd; hLabel.ZIndex=25001
-
-    local sub = Instance.new("TextLabel",f)
-    sub.Size=UDim2.new(1,-28,0,17); sub.Position=UDim2.fromOffset(14,33); sub.BackgroundTransparency=1
-    sub.Text="Current scan overview"; sub.TextColor3=THEME.muted; sub.TextSize=9; sub.Font=Enum.Font.Gotham
-    sub.TextXAlignment=Enum.TextXAlignment.Left; sub.ZIndex=25001
-
-    local c=Instance.new("TextButton",f)
-    c.Size=UDim2.fromOffset(30,28); c.Position=UDim2.new(1,-40,0,8); c.Text="X"; c.TextColor3=THEME.text
-    c.BackgroundColor3=THEME.surface; c.BorderSizePixel=0; c.ZIndex=25001; c.Font=Enum.Font.GothamBold; c.TextSize=12; round(c,5)
-    c.Activated:Connect(function() f:Destroy() end)
-
-    local scroll=Instance.new("ScrollingFrame",f)
-    scroll.Name="StatsScroll"; scroll.Size=UDim2.new(1,-28,1,-62); scroll.Position=UDim2.fromOffset(14,58)
-    scroll.BackgroundTransparency=1; scroll.BorderSizePixel=0; scroll.ScrollBarThickness=5; scroll.ScrollBarImageTransparency=.15
-    scroll.AutomaticCanvasSize=Enum.AutomaticSize.None; scroll.CanvasSize=UDim2.new(0,0,0,0); scroll.ZIndex=25001
-    local layout=Instance.new("UIListLayout",scroll); layout.Padding=UDim.new(0,5); layout.SortOrder=Enum.SortOrder.LayoutOrder
-    local pad=Instance.new("UIPadding",scroll); pad.PaddingBottom=UDim.new(0,12); pad.PaddingRight=UDim.new(0,4)
-    local function updateCanvas() scroll.CanvasSize=UDim2.new(0,0,0,layout.AbsoluteContentSize.Y+14) end
-    layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(updateCanvas)
-
-    local function row(text, height, accent)
-        local l=Instance.new("TextLabel",scroll); l.Size=UDim2.new(1,-4,0,height or 32)
-        l.BackgroundColor3=accent and THEME.surface or THEME.panel2; l.BorderSizePixel=0; l.Text=text
-        l.TextColor3=accent and THEME.accent or THEME.text; l.TextSize=11; l.Font=accent and Enum.Font.GothamBold or Enum.Font.Gotham
-        l.TextXAlignment=Enum.TextXAlignment.Left; l.TextYAlignment=Enum.TextYAlignment.Center; l.TextTruncate=Enum.TextTruncate.AtEnd
-        l.ZIndex=25002; round(l,6); local p=Instance.new("UIPadding",l); p.PaddingLeft=UDim.new(0,9); p.PaddingRight=UDim.new(0,8)
-        return l
-    end
-
-    local totalAttrs = attributeCount
-    local totalTags = cachedTagCount
-    local maxDepth = cachedMaxDepth
-
-    row("SCAN",27,true); row("Instances:  "..tostring(instanceCount)); row("Attributes:  "..tostring(totalAttrs)); row("Tags:  "..tostring(totalTags)); row("Maximum hierarchy depth:  "..tostring(maxDepth))
-    row("CLASS BREAKDOWN",27,true)
-    local names={}; for k in pairs(classCounts) do table.insert(names,k) end
-    table.sort(names,function(a,b) return classCounts[a]>classCounts[b] end)
-    for _,k in ipairs(names) do row(k.."  •  "..tostring(classCounts[k]),30) end
-    task.defer(function() updateCanvas(); scroll.CanvasPosition=Vector2.new(0,0) end)
-end
-
---========================================================
 -- CLASS FILTER
 --========================================================
 local function showClassFilter()
@@ -3815,9 +3726,6 @@ local function startWatching()
                     if not parentMeta then break end
                     parentMeta.descendantCount = (parentMeta.descendantCount or 0) + addedSubtree
                     parent = parent.Parent
-                end
-                if addedMeta and addedMeta.depth and addedMeta.depth > cachedMaxDepth then
-                    cachedMaxDepth = addedMeta.depth
                 end
                 statusLabel.Text = "Instances: " .. tostring(instanceCount) .. " | Attributes: " .. tostring(attributeCount)
                 searchCacheQuery = nil
@@ -4034,10 +3942,10 @@ local function updateMobileLayout()
     toolbar.Size = UDim2.new(1,-20,0,toolbarHeight)
     toolbar.Position = UDim2.fromOffset(10,top)
 
-    local buttons={rescanButton,expandButton,collapseButton,jsonButton,statsButton,filterButton}
-    local desktopLabels={"Rescan","Expand All","Collapse All","JSON","Stats","Class"}
-    local compactLabels={"Scan","Expand","Collapse","JSON","Stats","Class"}
-    local phoneLabels={"Scan","Exp","Col","JSON","Stats","Class"}
+    local buttons={rescanButton,expandButton,collapseButton,jsonButton,filterButton}
+    local desktopLabels={"Rescan","Expand All","Collapse All","JSON","Class"}
+    local compactLabels={"Scan","Expand","Collapse","JSON","Class"}
+    local phoneLabels={"Scan","Exp","Col","JSON","Class"}
     local gap = phone and 2 or (compact and 4 or 6)
     local availableWidth = math.max(300, mainFrame.AbsoluteSize.X - 20)
     local minButton = phone and 26 or (compact and 48 or 34)
@@ -4101,7 +4009,6 @@ elseif input.KeyCode == Enum.KeyCode.Escape then
 if screenGui:FindFirstChild("JSONExportWindow") then
  local j=screenGui:FindFirstChild("JSONExportWindow"); local o=screenGui:FindFirstChild("JSONOverlay"); if o then o:Destroy() end; if j then j:Destroy() end
 end
-if screenGui:FindFirstChild("InspectorStats") then screenGui.InspectorStats:Destroy() end
 if screenGui:FindFirstChild("InspectorClassFilter") then screenGui.InspectorClassFilter:Destroy() end
 end
 end)
