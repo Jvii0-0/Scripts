@@ -850,331 +850,446 @@ end
 -- JSON
 ------------------------------------------------------------
 
-local JSON_YIELD_EVERY = 100
+-- ============================================================
+-- JSON EXPORT
+-- ============================================================
 
-local function safeJSONValue(value)
-    local valueType = typeof(value)
+local JSON_BATCH_SIZE = 25
+local exportCancelled = false
+local jsonGui = nil
 
-    -- Basic JSON-safe values
-    if value == nil
-        or valueType == "string"
-        or valueType == "boolean"
-        or valueType == "number" then
+-- Convert values into guaranteed JSON-safe values.
+local function safeJSONValue(value, depth)
+	depth = depth or 0
 
-        -- JSON does not accept NaN / infinity.
-        if valueType == "number" then
-            if value ~= value or value == math.huge or value == -math.huge then
-                return {
-                    type = "number",
-                    value = tostring(value)
-                }
-            end
-        end
+	-- Prevent pathological/circular tables
+	if depth > 10 then
+		return {
+			type = "table",
+			value = "<max depth reached>"
+		}
+	end
 
-        return value
-    end
+	local valueType = typeof(value)
 
-    -- Roblox datatypes
-    if valueType == "Vector3" then
-        return {
-            type = "Vector3",
-            X = value.X,
-            Y = value.Y,
-            Z = value.Z
-        }
+	if valueType == "nil"
+		or valueType == "string"
+		or valueType == "boolean" then
+		return value
+	end
 
-    elseif valueType == "Vector2" then
-        return {
-            type = "Vector2",
-            X = value.X,
-            Y = value.Y
-        }
+	if valueType == "number" then
+		-- JSON cannot represent NaN / infinity
+		if value ~= value or value == math.huge or value == -math.huge then
+			return {
+				type = "number",
+				value = tostring(value)
+			}
+		end
 
-    elseif valueType == "Color3" then
-        return {
-            type = "Color3",
-            R = value.R,
-            G = value.G,
-            B = value.B
-        }
+		return value
+	end
 
-    elseif valueType == "CFrame" then
-        local components = {value:GetComponents()}
+	if valueType == "Vector3" then
+		return {
+			type = "Vector3",
+			X = value.X,
+			Y = value.Y,
+			Z = value.Z
+		}
 
-        return {
-            type = "CFrame",
-            components = components
-        }
+	elseif valueType == "Vector2" then
+		return {
+			type = "Vector2",
+			X = value.X,
+			Y = value.Y
+		}
 
-    elseif valueType == "UDim2" then
-        return {
-            type = "UDim2",
-            X = {
-                Scale = value.X.Scale,
-                Offset = value.X.Offset
-            },
-            Y = {
-                Scale = value.Y.Scale,
-                Offset = value.Y.Offset
-            }
-        }
+	elseif valueType == "Color3" then
+		return {
+			type = "Color3",
+			R = value.R,
+			G = value.G,
+			B = value.B
+		}
 
-    elseif valueType == "UDim" then
-        return {
-            type = "UDim",
-            Scale = value.Scale,
-            Offset = value.Offset
-        }
+	elseif valueType == "CFrame" then
+		local components = {value:GetComponents()}
 
-    elseif valueType == "BrickColor" then
-        return {
-            type = "BrickColor",
-            Name = value.Name,
-            Number = value.Number
-        }
+		return {
+			type = "CFrame",
+			components = components
+		}
 
-    elseif valueType == "EnumItem" then
-        return {
-            type = "EnumItem",
-            EnumType = tostring(value.EnumType),
-            Name = value.Name,
-            Value = value.Value
-        }
+	elseif valueType == "UDim2" then
+		return {
+			type = "UDim2",
+			X = {
+				Scale = value.X.Scale,
+				Offset = value.X.Offset
+			},
+			Y = {
+				Scale = value.Y.Scale,
+				Offset = value.Y.Offset
+			}
+		}
 
-    elseif valueType == "Instance" then
-        return {
-            type = "Instance",
-            Name = value.Name,
-            ClassName = value.ClassName,
-            Path = getPath(value)
-        }
-    end
+	elseif valueType == "UDim" then
+		return {
+			type = "UDim",
+			Scale = value.Scale,
+			Offset = value.Offset
+		}
 
-    -- Tables are handled recursively.
-    if valueType == "table" then
-        local result = {}
+	elseif valueType == "BrickColor" then
+		return {
+			type = "BrickColor",
+			Name = value.Name,
+			Number = value.Number
+		}
 
-        for key, item in pairs(value) do
-            local safeKey = tostring(key)
+	elseif valueType == "EnumItem" then
+		return {
+			type = "EnumItem",
+			enum = tostring(value.EnumType),
+			name = value.Name,
+			value = value.Value
+		}
 
-            local ok, safeValue = pcall(function()
-                return safeJSONValue(item)
-            end)
+	elseif valueType == "Instance" then
+		return {
+			type = "Instance",
+			name = value.Name,
+			className = value.ClassName,
+			path = getPath(value)
+		}
 
-            if ok then
-                result[safeKey] = safeValue
-            else
-                result[safeKey] = tostring(item)
-            end
-        end
+	elseif valueType == "table" then
+		local result = {}
 
-        return {
-            type = "table",
-            value = result
-        }
-    end
+		for key, item in pairs(value) do
+			local safeKey
 
-    -- Anything unknown gets converted to text rather than being
-    -- passed directly to JSONEncode.
-    return {
-        type = valueType,
-        value = tostring(value)
-    }
+			if typeof(key) == "string" then
+				safeKey = key
+			else
+				safeKey = tostring(key)
+			end
+
+			local success, converted = pcall(function()
+				return safeJSONValue(item, depth + 1)
+			end)
+
+			if success then
+				result[safeKey] = converted
+			else
+				result[safeKey] = {
+					type = "error",
+					value = tostring(converted)
+				}
+			end
+		end
+
+		return result
+	end
+
+	-- Final fallback:
+	-- NEVER give an unsupported Roblox datatype directly to JSONEncode.
+	return {
+		type = valueType,
+		value = tostring(value)
+	}
+end
+
+
+local function buildJSONAsync(updateStatus)
+	local snapshot = {}
+
+	-- Snapshot scanned Instances first so the live watcher cannot
+	-- modify the table while we're exporting.
+	for instance in pairs(scanned) do
+		table.insert(snapshot, instance)
+	end
+
+	local total = #snapshot
+	local encodedEntries = {}
+
+	for i, instance in ipairs(snapshot) do
+		if exportCancelled then
+			return nil, "Export cancelled."
+		end
+
+		local entrySuccess, entryResult = pcall(function()
+
+			local attributes = {}
+
+			-- Get attributes safely
+			local attrSuccess, attrResult = pcall(function()
+				return getAttributes(instance)
+			end)
+
+			if attrSuccess and type(attrResult) == "table" then
+				for attributeName, attributeValue in pairs(attrResult) do
+					local valueSuccess, safeValue = pcall(function()
+						return safeJSONValue(attributeValue)
+					end)
+
+					if valueSuccess then
+						attributes[attributeName] = safeValue
+					else
+						attributes[attributeName] = {
+							type = "error",
+							value = tostring(safeValue)
+						}
+					end
+				end
+			end
+
+			local path = "<unknown>"
+
+			pcall(function()
+				path = getPath(instance)
+			end)
+
+			local entry = {
+				name = instance.Name,
+				className = instance.ClassName,
+				path = path,
+				attributes = attributes
+			}
+
+			return HttpService:JSONEncode(entry)
+		end)
+
+		if entrySuccess then
+			table.insert(encodedEntries, entryResult)
+		else
+			-- Keep the export alive even if one Instance fails.
+			local errorEntry = {
+				name = "<export error>",
+				className = "Unknown",
+				path = "<unknown>",
+				attributes = {},
+				exportError = tostring(entryResult)
+			}
+
+			local fallbackSuccess, fallbackJSON = pcall(function()
+				return HttpService:JSONEncode(errorEntry)
+			end)
+
+			if fallbackSuccess then
+				table.insert(encodedEntries, fallbackJSON)
+			end
+		end
+
+		-- Update progress frequently.
+		if i % JSON_BATCH_SIZE == 0 or i == total then
+			if updateStatus then
+				updateStatus(i, total)
+			end
+
+			-- Give Roblox time to render/respond.
+			task.wait()
+		end
+	end
+
+	if exportCancelled then
+		return nil, "Export cancelled."
+	end
+
+	return "[" .. table.concat(encodedEntries, ",") .. "]"
 end
 
 
 local function showJSON()
-    -- Create the window immediately.
-    local jsonGui = Instance.new("Frame")
-    jsonGui.Name = "JSONExport"
-    jsonGui.Size = UDim2.new(0, 750, 0, 500)
-    jsonGui.Position = UDim2.new(0.5, -375, 0.5, -250)
-    jsonGui.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-    jsonGui.BorderSizePixel = 0
-    jsonGui.ZIndex = 2000
-    jsonGui.Parent = screenGui
+	-- Close an existing JSON window first.
+	if jsonGui then
+		jsonGui:Destroy()
+		jsonGui = nil
+	end
 
-    local jsonCorner = Instance.new("UICorner")
-    jsonCorner.CornerRadius = UDim.new(0, 8)
-    jsonCorner.Parent = jsonGui
+	exportCancelled = false
 
-    -- Title
-    local jsonTitle = Instance.new("TextLabel")
-    jsonTitle.Size = UDim2.new(1, -50, 0, 40)
-    jsonTitle.Position = UDim2.new(0, 15, 0, 0)
-    jsonTitle.BackgroundTransparency = 1
-    jsonTitle.Text = "JSON Export"
-    jsonTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
-    jsonTitle.TextSize = 18
-    jsonTitle.Font = Enum.Font.GothamBold
-    jsonTitle.TextXAlignment = Enum.TextXAlignment.Left
-    jsonTitle.ZIndex = 2001
-    jsonTitle.Parent = jsonGui
+	-- ========================================================
+	-- CREATE WINDOW IMMEDIATELY
+	-- ========================================================
 
-    -- Close button
-    local jsonClose = Instance.new("TextButton")
-    jsonClose.Size = UDim2.new(0, 35, 0, 30)
-    jsonClose.Position = UDim2.new(1, -45, 0, 5)
-    jsonClose.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
-    jsonClose.BorderSizePixel = 0
-    jsonClose.Text = "X"
-    jsonClose.TextColor3 = Color3.fromRGB(255, 255, 255)
-    jsonClose.TextSize = 16
-    jsonClose.Font = Enum.Font.GothamBold
-    jsonClose.ZIndex = 2002
-    jsonClose.Parent = jsonGui
+	jsonGui = Instance.new("ScreenGui")
+	jsonGui.Name = "JSONExportGui"
+	jsonGui.ResetOnSpawn = false
+	jsonGui.DisplayOrder = 2147483647
+	jsonGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	jsonGui.Parent = playerGui
 
-    local closeCorner = Instance.new("UICorner")
-    closeCorner.CornerRadius = UDim.new(0, 5)
-    closeCorner.Parent = jsonClose
+	local frame = Instance.new("Frame")
+	frame.Name = "JSONFrame"
+	frame.Size = UDim2.new(0, 750, 0, 500)
+	frame.Position = UDim2.new(0.5, -375, 0.5, -250)
+	frame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+	frame.BorderSizePixel = 0
+	frame.Parent = jsonGui
 
-    -- Status
-    local jsonStatus = Instance.new("TextLabel")
-    jsonStatus.Size = UDim2.new(1, -30, 0, 25)
-    jsonStatus.Position = UDim2.new(0, 15, 0, 42)
-    jsonStatus.BackgroundTransparency = 1
-    jsonStatus.Text = "Preparing JSON export..."
-    jsonStatus.TextColor3 = Color3.fromRGB(180, 180, 180)
-    jsonStatus.TextSize = 13
-    jsonStatus.Font = Enum.Font.Gotham
-    jsonStatus.TextXAlignment = Enum.TextXAlignment.Left
-    jsonStatus.ZIndex = 2001
-    jsonStatus.Parent = jsonGui
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = frame
 
-    -- JSON textbox
-    local jsonBox = Instance.new("TextBox")
-    jsonBox.Size = UDim2.new(1, -30, 1, -85)
-    jsonBox.Position = UDim2.new(0, 15, 0, 72)
-    jsonBox.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
-    jsonBox.BorderSizePixel = 0
-    jsonBox.TextColor3 = Color3.fromRGB(220, 220, 220)
-    jsonBox.TextSize = 13
-    jsonBox.Font = Enum.Font.Code
-    jsonBox.TextXAlignment = Enum.TextXAlignment.Left
-    jsonBox.TextYAlignment = Enum.TextYAlignment.Top
-    jsonBox.MultiLine = true
-    jsonBox.ClearTextOnFocus = false
-    jsonBox.TextEditable = true
-    jsonBox.TextWrapped = false
-    jsonBox.Text = "Generating JSON..."
-    jsonBox.ZIndex = 2001
-    jsonBox.Parent = jsonGui
+	-- Title
+	local title = Instance.new("TextLabel")
+	title.Size = UDim2.new(1, -120, 0, 40)
+	title.Position = UDim2.new(0, 15, 0, 5)
+	title.BackgroundTransparency = 1
+	title.Text = "JSON Export"
+	title.TextColor3 = Color3.new(1, 1, 1)
+	title.TextSize = 20
+	title.Font = Enum.Font.GothamBold
+	title.TextXAlignment = Enum.TextXAlignment.Left
+	title.Parent = frame
 
-    local boxCorner = Instance.new("UICorner")
-    boxCorner.CornerRadius = UDim.new(0, 5)
-    boxCorner.Parent = jsonBox
+	-- Close button
+	local closeButton = Instance.new("TextButton")
+	closeButton.Size = UDim2.new(0, 40, 0, 32)
+	closeButton.Position = UDim2.new(1, -50, 0, 8)
+	closeButton.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+	closeButton.Text = "X"
+	closeButton.TextColor3 = Color3.new(1, 1, 1)
+	closeButton.TextSize = 16
+	closeButton.Font = Enum.Font.GothamBold
+	closeButton.Parent = frame
 
-    jsonClose.MouseButton1Click:Connect(function()
-        jsonGui:Destroy()
-    end)
+	local closeCorner = Instance.new("UICorner")
+	closeCorner.CornerRadius = UDim.new(0, 6)
+	closeCorner.Parent = closeButton
 
-    -- Snapshot scanned Instances
-    local instances = {}
+	closeButton.MouseButton1Click:Connect(function()
+		exportCancelled = true
 
-    for instance in pairs(scanned) do
-        table.insert(instances, instance)
-    end
+		if jsonGui then
+			jsonGui:Destroy()
+			jsonGui = nil
+		end
+	end)
 
-    jsonStatus.Text = string.format(
-        "Generating JSON... 0 / %d",
-        #instances
-    )
+	-- Cancel button
+	local cancelButton = Instance.new("TextButton")
+	cancelButton.Size = UDim2.new(0, 100, 0, 32)
+	cancelButton.Position = UDim2.new(1, -160, 0, 8)
+	cancelButton.BackgroundColor3 = Color3.fromRGB(80, 50, 50)
+	cancelButton.Text = "Cancel"
+	cancelButton.TextColor3 = Color3.new(1, 1, 1)
+	cancelButton.TextSize = 14
+	cancelButton.Font = Enum.Font.Gotham
+	cancelButton.Parent = frame
 
-    task.spawn(function()
+	local cancelCorner = Instance.new("UICorner")
+	cancelCorner.CornerRadius = UDim.new(0, 6)
+	cancelCorner.Parent = cancelButton
 
-        local success, result = pcall(function()
-            local encodedEntries = {}
-            local total = #instances
+	cancelButton.MouseButton1Click:Connect(function()
+		exportCancelled = true
+		cancelButton.Text = "Cancelling..."
+		cancelButton.Active = false
+	end)
 
-            for i, instance in ipairs(instances) do
+	-- Status
+	local status = Instance.new("TextLabel")
+	status.Size = UDim2.new(1, -30, 0, 30)
+	status.Position = UDim2.new(0, 15, 0, 45)
+	status.BackgroundTransparency = 1
+	status.Text = "Generating JSON..."
+	status.TextColor3 = Color3.fromRGB(200, 200, 200)
+	status.TextSize = 14
+	status.Font = Enum.Font.Gotham
+	status.TextXAlignment = Enum.TextXAlignment.Left
+	status.Parent = frame
 
-                if instance and instance.Parent then
+	-- JSON textbox
+	local textBox = Instance.new("TextBox")
+	textBox.Size = UDim2.new(1, -30, 1, -90)
+	textBox.Position = UDim2.new(0, 15, 0, 80)
+	textBox.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+	textBox.BorderSizePixel = 0
+	textBox.ClearTextOnFocus = false
+	textBox.MultiLine = true
+	textBox.TextEditable = true
+	textBox.Text = "Generating JSON..."
+	textBox.TextColor3 = Color3.new(1, 1, 1)
+	textBox.TextSize = 13
+	textBox.Font = Enum.Font.Code
+	textBox.TextXAlignment = Enum.TextXAlignment.Left
+	textBox.TextYAlignment = Enum.TextYAlignment.Top
+	textBox.TextWrapped = false
+	textBox.Parent = frame
 
-                    local attributes = {}
-                    local rawAttributes = getAttributes(instance)
+	local textCorner = Instance.new("UICorner")
+	textCorner.CornerRadius = UDim.new(0, 6)
+	textCorner.Parent = textBox
 
-                    for key, value in pairs(rawAttributes) do
-                        local ok, safeValue = pcall(function()
-                            return safeJSONValue(value)
-                        end)
 
-                        if ok then
-                            attributes[tostring(key)] = safeValue
-                        else
-                            attributes[tostring(key)] = {
-                                type = typeof(value),
-                                value = tostring(value)
-                            }
-                        end
-                    end
+	-- ========================================================
+	-- GENERATE IN BACKGROUND
+	-- ========================================================
 
-                    local entry = {
-                        name = tostring(instance.Name),
-                        className = tostring(instance.ClassName),
-                        path = tostring(getPath(instance)),
-                        attributes = attributes
-                    }
+	task.spawn(function()
 
-                    -- Protect this individual entry.
-                    local encodedOK, encoded = pcall(function()
-                        return HttpService:JSONEncode(entry)
-                    end)
+		local success, result, errorMessage = pcall(function()
 
-                    if encodedOK then
-                        encodedEntries[i] = encoded
-                    else
-                        -- Do not abort the entire export.
-                        encodedEntries[i] = HttpService:JSONEncode({
-                            name = tostring(instance.Name),
-                            className = tostring(instance.ClassName),
-                            path = tostring(getPath(instance)),
-                            attributes = {},
-                            exportError = tostring(encoded)
-                        })
-                    end
+			local json, err = buildJSONAsync(function(current, total)
+				if status and status.Parent then
+					status.Text = string.format(
+						"Generating JSON... %d / %d",
+						current,
+						total
+					)
+				end
+			end)
 
-                else
-                    encodedEntries[i] = "null"
-                end
+			if not json then
+				return nil, err
+			end
 
-                -- Yield regularly so the client remains responsive.
-                if i % JSON_YIELD_EVERY == 0 then
-                    jsonStatus.Text = string.format(
-                        "Generating JSON... %d / %d (%.1f%%)",
-                        i,
-                        total,
-                        total > 0 and (i / total) * 100 or 100
-                    )
+			return json, nil
+		end)
 
-                    task.wait()
-                end
-            end
+		if not success then
+			if status and status.Parent then
+				status.Text = "Export failed."
+			end
 
-            task.wait()
+			if textBox and textBox.Parent then
+				textBox.Text = "EXPORT FAILED:\n\n" .. tostring(result)
+			end
 
-            jsonStatus.Text = "Assembling JSON..."
+			return
+		end
 
-            return "[" .. table.concat(encodedEntries, ",") .. "]"
-        end)
+		if not result then
+			if status and status.Parent then
+				status.Text = "Export cancelled."
+			end
 
-        if not jsonGui or not jsonGui.Parent then
-            return
-        end
+			if textBox and textBox.Parent then
+				textBox.Text = "EXPORT CANCELLED."
+			end
 
-        if success then
-            jsonBox.Text = result
+			return
+		end
 
-            jsonStatus.Text = string.format(
-                "JSON export complete — %d Instances",
-                #instances
-            )
-        else
-            jsonBox.Text = "JSON export failed:\n\n" .. tostring(result)
-            jsonStatus.Text = "Export failed"
-        end
-    end)
+		-- Window may have been closed while exporting.
+		if not jsonGui or not jsonGui.Parent then
+			return
+		end
+
+		status.Text = "JSON generated successfully."
+
+		textBox.Text = result
+
+		-- Put cursor at beginning.
+		pcall(function()
+			textBox.CursorPosition = 1
+			textBox.SelectionStart = 1
+		end)
+	end)
 end
-
 ------------------------------------------------------------
 -- EXPAND / COLLAPSE
 ------------------------------------------------------------
