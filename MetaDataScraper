@@ -1040,20 +1040,109 @@ end
 -- DISCORD UPLOAD
 --========================================================
 
+--========================================================
+-- DISCORD UPLOAD RESULT POPUP
+--========================================================
+
+local function showDiscordUploadResult(title, message, success)
+    local existing = playerGui:FindFirstChild("DiscordUploadResult")
+    if existing then
+        existing:Destroy()
+    end
+
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "DiscordUploadResult"
+    gui.ResetOnSpawn = false
+    gui.IgnoreGuiInset = true
+    gui.DisplayOrder = 2147483647
+    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    gui.Parent = playerGui
+
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.fromOffset(460, 210)
+    frame.Position = UDim2.new(0.5, -230, 0.5, -105)
+    frame.BackgroundColor3 = Color3.fromRGB(28, 28, 28)
+    frame.BorderSizePixel = 0
+    frame.ZIndex = 100
+    frame.Parent = gui
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 10)
+    corner.Parent = frame
+
+    local stroke = Instance.new("UIStroke")
+    stroke.Thickness = 2
+    stroke.Color = success
+        and Color3.fromRGB(70, 200, 100)
+        or Color3.fromRGB(220, 70, 70)
+    stroke.Parent = frame
+
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.Position = UDim2.fromOffset(18, 12)
+    titleLabel.Size = UDim2.new(1, -70, 0, 32)
+    titleLabel.Font = Enum.Font.GothamBold
+    titleLabel.TextSize = 19
+    titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    titleLabel.TextColor3 = success
+        and Color3.fromRGB(90, 220, 120)
+        or Color3.fromRGB(255, 90, 90)
+    titleLabel.Text = title
+    titleLabel.ZIndex = 101
+    titleLabel.Parent = frame
+
+    local closeButton = Instance.new("TextButton")
+    closeButton.BackgroundColor3 = Color3.fromRGB(48, 48, 48)
+    closeButton.Position = UDim2.new(1, -48, 0, 10)
+    closeButton.Size = UDim2.fromOffset(36, 32)
+    closeButton.Font = Enum.Font.GothamBold
+    closeButton.TextSize = 17
+    closeButton.Text = "X"
+    closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    closeButton.BorderSizePixel = 0
+    closeButton.AutoButtonColor = true
+    closeButton.ZIndex = 102
+    closeButton.Parent = frame
+
+    local closeCorner = Instance.new("UICorner")
+    closeCorner.CornerRadius = UDim.new(0, 5)
+    closeCorner.Parent = closeButton
+
+    closeButton.Activated:Connect(function()
+        gui:Destroy()
+    end)
+
+    local body = Instance.new("TextLabel")
+    body.BackgroundTransparency = 1
+    body.Position = UDim2.fromOffset(18, 55)
+    body.Size = UDim2.new(1, -36, 1, -70)
+    body.Font = Enum.Font.Gotham
+    body.TextSize = 14
+    body.TextWrapped = true
+    body.TextXAlignment = Enum.TextXAlignment.Left
+    body.TextYAlignment = Enum.TextYAlignment.Top
+    body.TextColor3 = Color3.fromRGB(225, 225, 225)
+    body.Text = tostring(message)
+    body.ZIndex = 101
+    body.Parent = frame
+end
+
 local function uploadJSONToDiscord(jsonData, fileName, recordCount)
 
     if DISCORD_WEBHOOK_URL == ""
         or DISCORD_WEBHOOK_URL == "PASTE_YOUR_WEBHOOK_URL_HERE" then
 
-        return false,
-            "Discord webhook URL has not been configured."
+        local message = "Discord webhook URL has not been configured.\n\nPaste your webhook into DISCORD_WEBHOOK_URL first."
+        showDiscordUploadResult("Discord Upload Failed", message, false)
+        return false, message
     end
 
     local requestFunction = getRequestFunction()
 
     if not requestFunction then
-        return false,
-            "No supported HTTP request function found."
+        local message = "No supported HTTP request function was found in this executor."
+        showDiscordUploadResult("Discord Upload Failed", message, false)
+        return false, message
     end
 
     local boundary =
@@ -1062,7 +1151,6 @@ local function uploadJSONToDiscord(jsonData, fileName, recordCount)
 
     local payload = HttpService:JSONEncode({
         username = "Roblox Client Inspector",
-
         content =
             "Roblox JSON export\n" ..
             "Records: " ..
@@ -1091,32 +1179,35 @@ local function uploadJSONToDiscord(jsonData, fileName, recordCount)
         "--" .. boundary .. "--\r\n"
 
     local ok, response = pcall(function()
-
         return requestFunction({
             Url = DISCORD_WEBHOOK_URL,
-
             Method = "POST",
 
             Headers = {
                 ["Content-Type"] =
-                    "multipart/form-data; boundary=" ..
-                    boundary
+                    "multipart/form-data; boundary=" .. boundary
             },
 
             Body = body
         })
-
     end)
 
     if not ok then
-        return false,
-            "HTTP request error: " ..
+        local message =
+            "The HTTP request itself failed.\n\n" ..
             tostring(response)
+
+        showDiscordUploadResult("Discord Upload Failed", message, false)
+        return false, message
     end
 
     if not response then
-        return false,
-            "HTTP request returned no response."
+        local message =
+            "The executor returned no HTTP response.\n\n" ..
+            "The request may not be supported by Delta."
+
+        showDiscordUploadResult("Discord Upload Failed", message, false)
+        return false, message
     end
 
     local statusCode =
@@ -1126,20 +1217,29 @@ local function uploadJSONToDiscord(jsonData, fileName, recordCount)
             0
         ) or 0
 
-    if statusCode >= 200 and statusCode < 300 then
-        return true, "Upload successful."
-    end
-
     local responseBody =
         response.Body or
         response.body or
         tostring(response)
 
-    return false,
-        "Discord upload failed. HTTP " ..
-        tostring(statusCode) ..
-        " | Response: " ..
-        tostring(responseBody)
+    if statusCode >= 200 and statusCode < 300 then
+        local message =
+            "Discord accepted the upload request.\n\n" ..
+            "HTTP Status: " .. tostring(statusCode) .. "\n" ..
+            "File: " .. tostring(fileName) .. "\n" ..
+            "Records: " .. tostring(recordCount)
+
+        showDiscordUploadResult("Discord Upload Successful", message, true)
+        return true, message
+    end
+
+    local message =
+        "Discord rejected the upload request.\n\n" ..
+        "HTTP Status: " .. tostring(statusCode) .. "\n\n" ..
+        "Response:\n" .. tostring(responseBody)
+
+    showDiscordUploadResult("Discord Upload Failed", message, false)
+    return false, message
 end
 
 --========================================================
