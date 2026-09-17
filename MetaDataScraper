@@ -858,7 +858,7 @@ local JSON_BATCH_SIZE = 25
 local JSON_PREVIEW_RECORDS = 25
 
 -- PUT YOUR WEBHOOK URL HERE
-local DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1550124148779384912/altEJPJIA5NNDFFn-g7ATiO85E6Do__0I-5VvnohV8O034_jXbHNA0qzvclTPAKU_XJn"
+local DISCORD_WEBHOOK_URL = "PUT_YOUR_NEW_WEBHOOK_HERE"
 
 local fullJSON = ""
 local jsonGenerating = false
@@ -1425,13 +1425,18 @@ end
 -- ASYNC JSON GENERATOR
 --========================================================
 
-local function buildJSONAsync(updateStatus)
+local function buildJSONAsync(updateStatus, selectedOnly)
 
     local snapshot = {}
 
-    -- Take a snapshot of everything currently scanned.
-    for instance in pairs(scanned) do
-        table.insert(snapshot, instance)
+    -- If an instance is selected, export only that instance.
+    -- Otherwise export the complete scan.
+    if selectedOnly and scanned[selectedOnly] then
+        table.insert(snapshot, selectedOnly)
+    else
+        for instance in pairs(scanned) do
+            table.insert(snapshot, instance)
+        end
     end
 
     -- Sort by path.
@@ -1482,12 +1487,15 @@ local function buildJSONAsync(updateStatus)
 
                     if valueOK then
 
-                        attributes[tostring(attributeName)] =
-                            safeValue
+                        attributes[tostring(attributeName)] = {
+                            dataType = typeof(attributeValue),
+                            value = safeValue
+                        }
 
                     else
 
                         attributes[tostring(attributeName)] = {
+                            dataType = typeof(attributeValue),
                             type = "error",
                             value = tostring(safeValue)
                         }
@@ -1502,12 +1510,24 @@ local function buildJSONAsync(updateStatus)
                 path = getPath(instance)
             end)
 
+            local childCount = 0
+
+            pcall(function()
+                childCount = #instance:GetChildren()
+            end)
+
             local record = {
                 name = instance.Name,
                 className = instance.ClassName,
                 path = path,
+                children = childCount,
+                attributesCount = 0,
                 attributes = attributes
             }
+
+            for _ in pairs(attributes) do
+                record.attributesCount += 1
+            end
 
             return HttpService:JSONEncode(record)
         end)
@@ -1524,6 +1544,8 @@ local function buildJSONAsync(updateStatus)
                 name = "<export error>",
                 className = "<unknown>",
                 path = "<unavailable>",
+                children = 0,
+                attributesCount = 0,
                 attributes = {},
                 exportError = tostring(encoded)
             }
@@ -1579,6 +1601,10 @@ local function showJSON()
     jsonRecordCount = 0
     jsonGenerating = true
 
+    -- Capture the current selection when the export starts.
+    local exportSelection = selectedInstance
+    local exportingSelected = exportSelection ~= nil and scanned[exportSelection] == true
+
     --====================================================
     -- WINDOW
     --====================================================
@@ -1629,7 +1655,7 @@ local function showJSON()
         UDim2.new(0, 15, 0, 5)
 
     title.BackgroundTransparency = 1
-    title.Text = "JSON Export"
+    title.Text = exportingSelected and "JSON Export — Selected" or "JSON Export — All"
 
     title.TextColor3 =
         Color3.new(1, 1, 1)
@@ -1697,7 +1723,7 @@ local function showJSON()
 
     statusLabel.BackgroundTransparency = 1
     statusLabel.Text =
-        "Preparing JSON..."
+        exportingSelected and "Preparing selected instance..." or "Preparing all scanned instances..."
 
     statusLabel.TextColor3 =
         Color3.new(1, 1, 1)
@@ -1940,8 +1966,10 @@ local function showJSON()
             local timestamp =
                 os.date("%Y-%m-%d_%H-%M-%S")
 
+            local exportPrefix = exportingSelected and "roblox_selected_export_" or "roblox_export_"
+
             local fileName =
-                "roblox_export_" ..
+                exportPrefix ..
                 timestamp ..
                 ".json"
 
@@ -2074,7 +2102,7 @@ local function showJSON()
 
                 end
 
-            end)
+            end, exportingSelected and exportSelection or nil)
 
         jsonGenerating = false
 
@@ -2175,14 +2203,15 @@ local function showJSON()
         if info.failed and info.failed > 0 then
 
             statusLabel.Text =
-                "Complete — " ..
+                (exportingSelected and "Selected export complete — " or "Export complete — ") ..
                 tostring(info.failed) ..
                 " record(s) had export errors."
 
         else
 
             statusLabel.Text =
-                "Complete — ready to upload."
+                exportingSelected and "Selected JSON generated successfully — ready to upload."
+                or "JSON generated successfully — ready to upload."
 
         end
 
