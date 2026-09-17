@@ -858,7 +858,7 @@ local JSON_BATCH_SIZE = 25
 local JSON_PREVIEW_RECORDS = 25
 
 -- PUT YOUR WEBHOOK URL HERE
-local DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1550101010507366512/8SaJEvnIZJxT7QKeVRokTSFBsYyhwzU5HHxHl3rFC8OMP4tf9xiLG6TOlcRGZCJAdySI"
+local DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1550116849252048946/nw2vbx11V7YiCI3v3BnPw9oYZc-7brCf8jL_oAafFoH1uW-zsCDafxKuSyUfXlG1dLUU"
 
 local fullJSON = ""
 local jsonGenerating = false
@@ -1130,7 +1130,7 @@ end
 local function uploadJSONToDiscord(jsonData, fileName, recordCount)
 
     if DISCORD_WEBHOOK_URL == ""
-        or DISCORD_WEBHOOK_URL == "PASTE_YOUR_WEBHOOK_URL_HERE" then
+        or DISCORD_WEBHOOK_URL == "" then
 
         local message = "Discord webhook URL has not been configured.\n\nPaste your webhook into DISCORD_WEBHOOK_URL first."
         showDiscordUploadResult("Discord Upload Failed", message, false)
