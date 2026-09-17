@@ -926,21 +926,6 @@ local function showJSON()
         jsonGui:Destroy()
     end)
 
-    local copyButton = Instance.new("TextButton")
-    copyButton.Size = UDim2.fromOffset(90, 30)
-    copyButton.Position = UDim2.new(1, -140, 0, 5)
-    copyButton.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-    copyButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    copyButton.Text = "Copy All"
-    copyButton.TextSize = 13
-    copyButton.BorderSizePixel = 0
-    copyButton.ZIndex = 31
-    copyButton.Parent = jsonGui
-
-    local copyCorner = Instance.new("UICorner")
-    copyCorner.CornerRadius = UDim.new(0, 5)
-    copyCorner.Parent = copyButton
-
     local textBox = Instance.new("TextBox")
     textBox.Size = UDim2.new(1, -20, 1, -55)
     textBox.Position = UDim2.fromOffset(10, 45)
@@ -963,12 +948,6 @@ local function showJSON()
 
     textBox.ZIndex = 31
     textBox.Parent = jsonGui
-
-    copyButton.Activated:Connect(function()
-        textBox:CaptureFocus()
-        textBox.CursorPosition = #textBox.Text + 1
-        textBox.SelectionStart = 1
-    end)
 end
 
 ------------------------------------------------------------
