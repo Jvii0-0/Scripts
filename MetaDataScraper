@@ -1013,9 +1013,11 @@ end
 
 local function getRequestFunction()
 
-    if syn and syn.request then
-        return syn.request
-    end
+local statusCode = tonumber(
+    response.StatusCode or
+    response.Status or
+    0
+) or 0
 
     if http_request then
         return http_request
