@@ -858,7 +858,7 @@ local JSON_BATCH_SIZE = 25
 local JSON_PREVIEW_RECORDS = 25
 
 -- PUT YOUR WEBHOOK URL HERE
-local DISCORD_WEBHOOK_URL = "PUT_YOUR_NEW_WEBHOOK_HERE"
+local DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1550124148779384912/altEJPJIA5NNDFFn-g7ATiO85E6Do__0I-5VvnohV8O034_jXbHNA0qzvclTPAKU_XJn"
 
 local fullJSON = ""
 local jsonGenerating = false
@@ -1458,6 +1458,80 @@ local function buildJSONAsync(updateStatus, selectedOnly)
 
     local encodedEntries = {}
 
+    -- Build a complete recursive record for a selected instance.
+    -- This keeps the normal full-scan export compact, while selected
+    -- folder exports include the entire descendant hierarchy.
+    local function buildInstanceRecord(instance, includeChildren)
+        local attributes = {}
+
+        local attrOK, attrData = pcall(function()
+            return getAttributes(instance)
+        end)
+
+        if attrOK and type(attrData) == "table" then
+            for attributeName, attributeValue in pairs(attrData) do
+                local valueOK, safeValue =
+                    pcall(function()
+                        return safeJSONValue(attributeValue)
+                    end)
+
+                if valueOK then
+                    attributes[tostring(attributeName)] = {
+                        dataType = typeof(attributeValue),
+                        value = safeValue
+                    }
+                else
+                    attributes[tostring(attributeName)] = {
+                        dataType = typeof(attributeValue),
+                        type = "error",
+                        value = tostring(safeValue)
+                    }
+                end
+            end
+        end
+
+        local path = "<unavailable>"
+        pcall(function()
+            path = getPath(instance)
+        end)
+
+        local children = {}
+        pcall(function()
+            for _, child in ipairs(instance:GetChildren()) do
+                if includeChildren then
+                    table.insert(children, buildInstanceRecord(child, true))
+                else
+                    table.insert(children, child)
+                end
+            end
+        end)
+
+        local childCount = #children
+        if not includeChildren then
+            -- In compact/full-scan mode, children is only used for its count.
+            children = nil
+        end
+
+        local record = {
+            name = instance.Name,
+            className = instance.ClassName,
+            path = path,
+            childrenCount = childCount,
+            attributesCount = 0,
+            attributes = attributes
+        }
+
+        for _ in pairs(attributes) do
+            record.attributesCount += 1
+        end
+
+        if includeChildren then
+            record.children = children
+        end
+
+        return record
+    end
+
     local total = #snapshot
     local processed = 0
     local failed = 0
@@ -1469,66 +1543,7 @@ local function buildJSONAsync(updateStatus, selectedOnly)
         end
 
         local ok, encoded = pcall(function()
-
-            local attributes = {}
-
-            local attrOK, attrData = pcall(function()
-                return getAttributes(instance)
-            end)
-
-            if attrOK and type(attrData) == "table" then
-
-                for attributeName, attributeValue in pairs(attrData) do
-
-                    local valueOK, safeValue =
-                        pcall(function()
-                            return safeJSONValue(attributeValue)
-                        end)
-
-                    if valueOK then
-
-                        attributes[tostring(attributeName)] = {
-                            dataType = typeof(attributeValue),
-                            value = safeValue
-                        }
-
-                    else
-
-                        attributes[tostring(attributeName)] = {
-                            dataType = typeof(attributeValue),
-                            type = "error",
-                            value = tostring(safeValue)
-                        }
-
-                    end
-                end
-            end
-
-            local path = "<unavailable>"
-
-            pcall(function()
-                path = getPath(instance)
-            end)
-
-            local childCount = 0
-
-            pcall(function()
-                childCount = #instance:GetChildren()
-            end)
-
-            local record = {
-                name = instance.Name,
-                className = instance.ClassName,
-                path = path,
-                children = childCount,
-                attributesCount = 0,
-                attributes = attributes
-            }
-
-            for _ in pairs(attributes) do
-                record.attributesCount += 1
-            end
-
+            local record = buildInstanceRecord(instance, selectedOnly ~= nil)
             return HttpService:JSONEncode(record)
         end)
 
@@ -1544,7 +1559,7 @@ local function buildJSONAsync(updateStatus, selectedOnly)
                 name = "<export error>",
                 className = "<unknown>",
                 path = "<unavailable>",
-                children = 0,
+                childrenCount = 0,
                 attributesCount = 0,
                 attributes = {},
                 exportError = tostring(encoded)
