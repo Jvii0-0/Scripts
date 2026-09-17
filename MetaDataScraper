@@ -159,32 +159,6 @@ if workspace.CurrentCamera then
     workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updatePanelSize)
 end
 
--- Mobile layout adjustments
-local function updateMobileLayout()
-    local camera = workspace.CurrentCamera
-    if not camera then return end
-
-    local mobile = camera.ViewportSize.X <= 600
-    if mobile then
-        searchBox.Size = UDim2.new(0, 100, 0, 30)
-        searchBox.Position = UDim2.new(1, -110, 0, 6)
-        statusLabel.Visible = false
-        treeFrame.Size = UDim2.new(0.5, -15, 1, -105)
-        detailsFrame.Size = UDim2.new(0.5, -15, 1, -105)
-    else
-        searchBox.Size = UDim2.new(0, 200, 0, 32)
-        searchBox.Position = UDim2.new(1, -255, 0, 5)
-        statusLabel.Visible = true
-        treeFrame.Size = UDim2.new(0.52, -15, 1, -105)
-        detailsFrame.Size = UDim2.new(0.48, -15, 1, -105)
-    end
-end
-
-updateMobileLayout()
-if workspace.CurrentCamera then
-    workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updateMobileLayout)
-end
-
 ------------------------------------------------------------
 -- TITLE BAR
 ------------------------------------------------------------
@@ -428,6 +402,42 @@ local detailsLayout = Instance.new("UIListLayout")
 detailsLayout.SortOrder = Enum.SortOrder.LayoutOrder
 detailsLayout.Padding = UDim.new(0, 5)
 detailsLayout.Parent = detailsScroll
+
+
+------------------------------------------------------------
+-- RESPONSIVE MOBILE LAYOUT
+------------------------------------------------------------
+
+local function updateMobileLayout()
+    local camera = workspace.CurrentCamera
+    if not camera then
+        return
+    end
+
+    local mobile = camera.ViewportSize.X <= 600
+
+    if mobile then
+        searchBox.Size = UDim2.new(0, 90, 0, 30)
+        searchBox.Position = UDim2.new(1, -132, 0, 6)
+        titleLabel.Size = UDim2.new(1, -145, 1, 0)
+        statusLabel.Visible = false
+        treeFrame.Size = UDim2.new(0.5, -15, 1, -105)
+        detailsFrame.Size = UDim2.new(0.5, -15, 1, -105)
+    else
+        searchBox.Size = UDim2.new(0, 200, 0, 32)
+        searchBox.Position = UDim2.new(1, -255, 0, 5)
+        titleLabel.Size = UDim2.new(1, -20, 1, 0)
+        statusLabel.Visible = true
+        treeFrame.Size = UDim2.new(0.52, -15, 1, -105)
+        detailsFrame.Size = UDim2.new(0.48, -15, 1, -105)
+    end
+end
+
+updateMobileLayout()
+
+if workspace.CurrentCamera then
+    workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updateMobileLayout)
+end
 
 ------------------------------------------------------------
 -- HELPERS
