@@ -858,7 +858,7 @@ local JSON_BATCH_SIZE = 25
 local JSON_PREVIEW_RECORDS = 25
 
 -- PUT YOUR WEBHOOK URL HERE
-local DISCORD_WEBHOOK_URL = "PUT_YOUR_NEW_WEBHOOK_HERE"
+local DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1550124148779384912/altEJPJIA5NNDFFn-g7ATiO85E6Do__0I-5VvnohV8O034_jXbHNA0qzvclTPAKU_XJn"
 
 local fullJSON = ""
 local jsonGenerating = false
