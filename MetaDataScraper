@@ -60,7 +60,9 @@ local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "ClientInspector"
 screenGui.ResetOnSpawn = false
 screenGui.IgnoreGuiInset = true
-screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+screenGui.DisplayOrder = 2147483647
+screenGui.DisplayOrder = 10000 -- Keep inspector above other game ScreenGuis
 screenGui.Parent = playerGui
 
 ------------------------------------------------------------
@@ -80,7 +82,7 @@ toggleButton.Text = "🔎"
 toggleButton.TextSize = 24
 toggleButton.BorderSizePixel = 0
 toggleButton.AutoButtonColor = true
-toggleButton.ZIndex = 20
+toggleButton.ZIndex = 1100
 toggleButton.Parent = screenGui
 
 local toggleCorner = Instance.new("UICorner")
@@ -105,7 +107,7 @@ mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
 mainFrame.BackgroundColor3 = Color3.fromRGB(24, 24, 24)
 mainFrame.BorderSizePixel = 0
 mainFrame.Visible = false
-mainFrame.ZIndex = 10
+mainFrame.ZIndex = 10000
 mainFrame.Parent = screenGui
 
 local mainCorner = Instance.new("UICorner")
@@ -126,7 +128,7 @@ titleBar.Name = "TitleBar"
 titleBar.Size = UDim2.new(1, 0, 0, 42)
 titleBar.BackgroundColor3 = Color3.fromRGB(32, 32, 32)
 titleBar.BorderSizePixel = 0
-titleBar.ZIndex = 11
+titleBar.ZIndex = 101
 titleBar.Parent = mainFrame
 
 local titleCorner = Instance.new("UICorner")
@@ -143,7 +145,7 @@ titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 titleLabel.TextSize = 18
 titleLabel.Font = Enum.Font.GothamBold
 titleLabel.TextXAlignment = Enum.TextXAlignment.Left
-titleLabel.ZIndex = 12
+titleLabel.ZIndex = 102
 titleLabel.Parent = titleBar
 
 local closeButton = Instance.new("TextButton")
@@ -157,7 +159,7 @@ closeButton.TextSize = 16
 closeButton.Font = Enum.Font.GothamBold
 closeButton.BorderSizePixel = 0
 closeButton.AutoButtonColor = true
-closeButton.ZIndex = 14
+closeButton.ZIndex = 104
 closeButton.Parent = titleBar
 
 local closeCorner = Instance.new("UICorner")
@@ -187,7 +189,7 @@ searchBox.TextSize = 14
 searchBox.Font = Enum.Font.Gotham
 searchBox.ClearTextOnFocus = false
 searchBox.BorderSizePixel = 0
-searchBox.ZIndex = 13
+searchBox.ZIndex = 103
 searchBox.Parent = titleBar
 
 local searchCorner = Instance.new("UICorner")
@@ -203,7 +205,7 @@ toolbar.Name = "Toolbar"
 toolbar.Size = UDim2.new(1, -20, 0, 40)
 toolbar.Position = UDim2.fromOffset(10, 48)
 toolbar.BackgroundTransparency = 1
-toolbar.ZIndex = 11
+toolbar.ZIndex = 101
 toolbar.Parent = mainFrame
 
 local function createButton(name, text, position, width)
@@ -274,7 +276,7 @@ statusLabel.Text = "Ready"
 statusLabel.TextSize = 13
 statusLabel.Font = Enum.Font.Gotham
 statusLabel.TextXAlignment = Enum.TextXAlignment.Left
-statusLabel.ZIndex = 12
+statusLabel.ZIndex = 102
 statusLabel.Parent = toolbar
 
 ------------------------------------------------------------
@@ -288,7 +290,7 @@ treeFrame.Position = UDim2.fromOffset(10, 95)
 
 treeFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 treeFrame.BorderSizePixel = 0
-treeFrame.ZIndex = 11
+treeFrame.ZIndex = 101
 treeFrame.Parent = mainFrame
 
 local treeCorner = Instance.new("UICorner")
@@ -311,7 +313,7 @@ treeScroll.ScrollBarThickness = 6
 treeScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 treeScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
 
-treeScroll.ZIndex = 12
+treeScroll.ZIndex = 102
 treeScroll.Parent = treeFrame
 
 local treeLayout = Instance.new("UIListLayout")
@@ -330,7 +332,7 @@ detailsFrame.Position = UDim2.new(0.52, 5, 0, 95)
 
 detailsFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 detailsFrame.BorderSizePixel = 0
-detailsFrame.ZIndex = 11
+detailsFrame.ZIndex = 101
 detailsFrame.Parent = mainFrame
 
 local detailsCorner = Instance.new("UICorner")
@@ -352,7 +354,7 @@ detailsScroll.BorderSizePixel = 0
 detailsScroll.ScrollBarThickness = 6
 detailsScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
 
-detailsScroll.ZIndex = 12
+detailsScroll.ZIndex = 102
 detailsScroll.Parent = detailsFrame
 
 local detailsLayout = Instance.new("UIListLayout")
@@ -884,7 +886,7 @@ local function showJSON()
 
     jsonGui.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
     jsonGui.BorderSizePixel = 0
-    jsonGui.ZIndex = 30
+    jsonGui.ZIndex = 2000
     jsonGui.Parent = screenGui
 
     local corner = Instance.new("UICorner")
