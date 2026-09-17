@@ -57,6 +57,20 @@ local favorites = {}
 local recentInstances = {}
 local classFilter = ""
 local lastExportInfo = nil
+local selectionHistory = {}
+local historyCursor = 0
+local historyNavigating = false
+local compareInstance = nil
+local exportHistory = {}
+local exportPresets = {
+    Minimal = {includeChildren = true, includeAttributes = true, includeProperties = false, includeTags = false, includeEmptyProperties = false},
+    Standard = {includeChildren = true, includeAttributes = true, includeProperties = true, includeTags = true, includeEmptyProperties = false},
+    Complete = {includeChildren = true, includeAttributes = true, includeProperties = true, includeTags = true, includeEmptyProperties = true}
+}
+local searchCache = {}
+local searchCacheQuery = nil
+local treeRebuildQueued = false
+local MAX_VISIBLE_TREE_NODES = 5000
 
 ------------------------------------------------------------
 -- GUI
@@ -269,7 +283,7 @@ searchBox.Position = UDim2.new(0.54, 0, 0, 8)
 searchBox.BackgroundColor3 = THEME.surface
 searchBox.TextColor3 = Color3.fromRGB(255, 255, 255)
 searchBox.PlaceholderColor3 = Color3.fromRGB(160, 160, 160)
-searchBox.PlaceholderText = "Search name, class, attribute..."
+searchBox.PlaceholderText = "Search...  name:Rare class:Part tag:Egg"
 searchBox.Text = ""
 searchBox.TextSize = 13
 searchBox.Font = Enum.Font.Gotham
@@ -371,14 +385,19 @@ UDim2.fromOffset(460, 0),
 70
 )
 
+local backButton = createButton("Back", "‹", UDim2.fromOffset(540, 0), 34)
+local forwardButton = createButton("Forward", "›", UDim2.fromOffset(580, 0), 34)
+local compareButton = createButton("Compare", "Compare", UDim2.fromOffset(620, 0), 72)
+local historyButton = createButton("History", "History", UDim2.fromOffset(700, 0), 72)
+
 ------------------------------------------------------------
 -- STATUS
 ------------------------------------------------------------
 
 local statusLabel = Instance.new("TextLabel")
 statusLabel.Name = "Status"
-statusLabel.Size = UDim2.new(1, -540, 0, 32)
-statusLabel.Position = UDim2.fromOffset(385, 0)
+statusLabel.Size = UDim2.new(1, -790, 0, 32)
+statusLabel.Position = UDim2.fromOffset(780, 0)
 
 statusLabel.BackgroundTransparency = 1
 statusLabel.TextColor3 = THEME.muted
@@ -753,53 +772,95 @@ end
 -- SEARCH
 ------------------------------------------------------------
 
-local function instanceMatches(instance)
-if classFilter ~= "" and string.lower(instance.ClassName) ~= string.lower(classFilter) then
-return false
+local function getInstanceTags(instance)
+    local tags = {}
+    pcall(function() tags = CollectionService:GetTags(instance) end)
+    return tags
 end
 
-if currentSearch == "" then
-return true
+local function parseSearchQuery(text)
+    local filters = {free = {}}
+    for token in string.gmatch(string.lower(text or ""), "[^%s]+") do
+        local key, value = token:match("^(name|class|path|attr|attribute|tag):(.+)$")
+        if key and value then
+            if key == "attribute" then key = "attr" end
+            filters[key] = filters[key] or {}
+            table.insert(filters[key], value)
+        elseif token ~= "" then
+            table.insert(filters.free, token)
+        end
+    end
+    return filters
 end
 
-local search = string.lower(currentSearch)
+local function instanceMatches(instance, queryText)
+    queryText = queryText or currentSearch
+    if classFilter ~= "" and string.lower(instance.ClassName) ~= string.lower(classFilter) then
+        return false
+    end
+    if queryText == "" then return true end
 
-if string.find(string.lower(instance.Name), search, 1, true) then
-return true
+    local f = parseSearchQuery(queryText)
+    local name = string.lower(instance.Name)
+    local className = string.lower(instance.ClassName)
+    local path = string.lower(getPath(instance))
+    local attributes = getAttributes(instance)
+    local tags = getInstanceTags(instance)
+
+    local function contains(list, needle)
+        for _, v in ipairs(list or {}) do
+            if string.find(v, needle, 1, true) then return true end
+        end
+        return false
+    end
+
+    for _, needle in ipairs(f.name or {}) do if not string.find(name, needle, 1, true) then return false end end
+    for _, needle in ipairs(f.class or {}) do if not string.find(className, needle, 1, true) then return false end end
+    for _, needle in ipairs(f.path or {}) do if not string.find(path, needle, 1, true) then return false end end
+    for _, needle in ipairs(f.attr or {}) do
+        local found = false
+        for k, v in pairs(attributes) do
+            if string.find(string.lower(tostring(k)), needle, 1, true) or string.find(string.lower(tostring(v)), needle, 1, true) then found = true break end
+        end
+        if not found then return false end
+    end
+    for _, needle in ipairs(f.tag or {}) do
+        local found = false
+        for _, tag in ipairs(tags) do if string.find(string.lower(tostring(tag)), needle, 1, true) then found = true break end end
+        if not found then return false end
+    end
+
+    for _, needle in ipairs(f.free or {}) do
+        local found = string.find(name, needle, 1, true) or string.find(className, needle, 1, true) or string.find(path, needle, 1, true)
+        if not found then
+            for k, v in pairs(attributes) do
+                if string.find(string.lower(tostring(k)), needle, 1, true) or string.find(string.lower(tostring(v)), needle, 1, true) then found = true break end
+            end
+        end
+        if not found then
+            for _, tag in ipairs(tags) do if string.find(string.lower(tostring(tag)), needle, 1, true) then found = true break end end
+        end
+        if not found then return false end
+    end
+    return true
 end
 
-if string.find(string.lower(instance.ClassName), search, 1, true) then
-return true
+local function refreshSearchCache()
+    if searchCacheQuery == currentSearch .. "|" .. classFilter then return end
+    searchCache = {}
+    searchCacheQuery = currentSearch .. "|" .. classFilter
+    for inst in pairs(scanned) do
+        searchCache[inst] = instanceMatches(inst)
+    end
 end
-
-local attributes = getAttributes(instance)
-
-for name, value in pairs(attributes) do
-if string.find(string.lower(tostring(name)), search, 1, true) then
-return true
-end
-
-if string.find(string.lower(tostring(value)), search, 1, true) then
-return true
-end
-end
-
-return false
-end
-
-------------------------------------------------------------
 
 local function hasMatchingDescendant(instance)
-for _, descendant in ipairs(instance:GetDescendants()) do
-if instanceMatches(descendant) then
-return true
-end
-end
-
-return false
+    for _, descendant in ipairs(instance:GetDescendants()) do
+        if searchCache[descendant] then return true end
+    end
+    return false
 end
 
-------------------------------------------------------------
 -- DETAILS
 ------------------------------------------------------------
 
@@ -851,6 +912,17 @@ end
 local function showDetails(instance)
 selectedInstance = instance
 
+if instance and not historyNavigating then
+    if historyCursor < #selectionHistory then
+        for i = #selectionHistory, historyCursor + 1, -1 do table.remove(selectionHistory, i) end
+    end
+    if selectionHistory[#selectionHistory] ~= instance then
+        table.insert(selectionHistory, instance)
+        if #selectionHistory > 30 then table.remove(selectionHistory, 1) end
+    end
+    historyCursor = #selectionHistory
+end
+
 clearDetails()
 
 if not instance then
@@ -896,6 +968,21 @@ section("INSTANCE")
 addDetail("Name: " .. instance.Name)
 addDetail("Class: " .. instance.ClassName)
 addDetail("Path: " .. getPath(instance), 48)
+local breadcrumb = Instance.new("TextLabel")
+breadcrumb.Size = UDim2.new(1, -10, 0, 26)
+breadcrumb.BackgroundColor3 = THEME.surface
+breadcrumb.TextColor3 = THEME.accent
+breadcrumb.Text = "game  ›  " .. string.gsub(getPath(instance), "^game%.?", "")
+breadcrumb.TextSize = 11
+breadcrumb.Font = Enum.Font.GothamMedium
+breadcrumb.TextXAlignment = Enum.TextXAlignment.Left
+breadcrumb.TextTruncate = Enum.TextTruncate.AtEnd
+breadcrumb.BorderSizePixel = 0
+breadcrumb.ZIndex = 13
+breadcrumb.Parent = detailsScroll
+round(breadcrumb, 5)
+local breadcrumbPad = Instance.new("UIPadding", breadcrumb)
+breadcrumbPad.PaddingLeft = UDim.new(0, 8)
 
 local parent = instance.Parent
 addDetail("Parent: " .. (parent and getPath(parent) or "nil"), 42)
@@ -912,6 +999,7 @@ section("QUICK ACTIONS")
 actionButton(favorites[instance] and "★ Remove Favorite" or "☆ Add Favorite", function()
  favorites[instance] = not favorites[instance]
  showDetails(instance)
+ showToast(favorites[instance] and "Added to favorites" or "Removed from favorites", "success")
 end)
 actionButton("Copy Path", function()
  local path = getPath(instance)
@@ -923,6 +1011,9 @@ actionButton("Copy Class", function()
  if setclipboard then pcall(function() setclipboard(instance.ClassName) end) end
  setMainStatus("Class copied: " .. instance.ClassName, "success", 1)
  showToast("Class copied to clipboard", "success")
+end)
+actionButton("Jump to Parent", function()
+ if parent and parent ~= game then showDetails(parent); setMainStatus("Moved to parent", "success", 1); showToast("Parent selected", "success") else showToast("No parent available", "warning") end
 end)
 actionButton("Copy JSON", function()
  local ok, encoded = pcall(function()
@@ -971,6 +1062,37 @@ else
  addDetail("No CollectionService tags.", 35)
 end
 
+section("PROPERTY SUMMARY")
+local propertyGroups = {
+    Transform = {"CFrame", "Position", "Orientation", "Size", "WorldCFrame", "WorldPosition", "WorldOrientation"},
+    Appearance = {"Color", "Material", "Transparency", "Reflectance", "CastShadow", "TextureID", "MeshId", "Texture"},
+    Physics = {"Anchored", "CanCollide", "CanTouch", "CanQuery", "Massless", "CollisionGroup"},
+    Behavior = {"Enabled", "Active", "Rate", "Lifetime", "Looped", "Playing", "Volume"}
+}
+for groupName, names in pairs(propertyGroups) do
+    local found = false
+    for _, propertyName in ipairs(names) do
+        local ok, value = pcall(function() return instance[propertyName] end)
+        if ok and value ~= nil then
+            if not found then section(groupName); found = true end
+            addDetail(propertyName .. " = " .. tostring(value) .. "  [" .. typeof(value) .. "]", 38)
+        end
+    end
+end
+
+section("RELATIONSHIPS")
+addDetail("Parent → " .. (parent and getPath(parent) or "nil"), 42)
+if children > 0 then actionButton("Show Children (" .. tostring(children) .. ")", function() expanded[instance] = true; rebuildTree(); setMainStatus("Showing children of " .. instance.Name, "success", 1); showToast("Children shown", "success") end) end
+local refCount = 0
+for _, propertyName in ipairs({"Adornee", "Attachment0", "Attachment1", "Part0", "Part1", "Target", "SoundId", "CameraSubject", "Parent"}) do
+    local ok, value = pcall(function() return instance[propertyName] end)
+    if ok and typeof(value) == "Instance" then
+        refCount += 1
+        addDetail(propertyName .. " → " .. getPath(value), 42)
+    end
+end
+if refCount == 0 then addDetail("No direct Instance references found.", 35) end
+
 section("RECENT SELECTIONS")
 for i = 1, math.min(#recentInstances, 5) do
  local recent = recentInstances[i]
@@ -979,6 +1101,79 @@ for i = 1, math.min(#recentInstances, 5) do
  end
 end
 end
+------------------------------------------------------------
+-- COMPARE / NAVIGATION WINDOWS
+------------------------------------------------------------
+local function snapshotInstance(instance)
+    local props = {}
+    local candidates = {
+        "CFrame","Position","Orientation","Size","Color","Material","Transparency",
+        "Reflectance","Anchored","CanCollide","CanTouch","CanQuery","Massless",
+        "CollisionGroup","Enabled","Active","Rate","Lifetime","Looped","Playing",
+        "Volume","PlaybackSpeed","FieldOfView","CameraType","DisplayName","Health",
+        "MaxHealth","WalkSpeed","JumpPower"
+    }
+    for _, name in ipairs(candidates) do
+        local ok, value = pcall(function() return instance[name] end)
+        if ok and value ~= nil then props[name] = tostring(value) .. " [" .. typeof(value) .. "]" end
+    end
+    for name, value in pairs(getAttributes(instance)) do
+        props["Attribute:" .. tostring(name)] = tostring(value) .. " [" .. typeof(value) .. "]"
+    end
+    return props
+end
+
+function showCompare(a, b)
+    local existing = screenGui:FindFirstChild("InspectorCompare")
+    if existing then existing:Destroy() end
+    local f = Instance.new("Frame", screenGui)
+    f.Name = "InspectorCompare"
+    f.Size = UDim2.new(0.9,0,0.78,0)
+    f.Position = UDim2.new(.5,0,.5,0)
+    f.AnchorPoint = Vector2.new(.5,.5)
+    f.BackgroundColor3 = THEME.bg
+    f.BorderSizePixel = 0
+    f.ZIndex = 28000
+    round(f,10); stroke(f,THEME.stroke,.05,1); gradient(f,90)
+    local h = Instance.new("TextLabel",f); h.Size=UDim2.new(1,-60,0,42); h.Position=UDim2.fromOffset(15,6); h.BackgroundTransparency=1; h.Text="COMPARE INSTANCES"; h.TextColor3=THEME.text; h.TextSize=17; h.Font=Enum.Font.GothamBold; h.TextXAlignment=Enum.TextXAlignment.Left; h.ZIndex=28001
+    local c=Instance.new("TextButton",f); c.Size=UDim2.fromOffset(32,30); c.Position=UDim2.new(1,-42,0,8); c.Text="X"; c.TextColor3=THEME.text; c.BackgroundColor3=THEME.surface; c.BorderSizePixel=0; c.ZIndex=28001; round(c,5); c.Activated:Connect(function() f:Destroy() end)
+    local left=Instance.new("TextLabel",f); left.Size=UDim2.new(.45,-15,0,52); left.Position=UDim2.fromOffset(15,50); left.BackgroundColor3=THEME.panel2; left.Text=a.Name.."\n"..a.ClassName.."\n"..getPath(a); left.TextColor3=THEME.text; left.TextSize=12; left.Font=Enum.Font.Gotham; left.TextXAlignment=Enum.TextXAlignment.Left; left.TextWrapped=true; left.ZIndex=28001; round(left,6)
+    local right=left:Clone(); right.Parent=f; right.Position=UDim2.new(.55,0,0,50); right.Text=b.Name.."\n"..b.ClassName.."\n"..getPath(b)
+    local scroll=Instance.new("ScrollingFrame",f); scroll.Size=UDim2.new(1,-30,1,-120); scroll.Position=UDim2.fromOffset(15,112); scroll.BackgroundTransparency=1; scroll.BorderSizePixel=0; scroll.ScrollBarThickness=5; scroll.AutomaticCanvasSize=Enum.AutomaticSize.Y; scroll.ZIndex=28001
+    local layout=Instance.new("UIListLayout",scroll); layout.Padding=UDim.new(0,4)
+    local pa=snapshotInstance(a); local pb=snapshotInstance(b); local keys={}
+    for k in pairs(pa) do keys[k]=true end; for k in pairs(pb) do keys[k]=true end
+    local list={}; for k in pairs(keys) do table.insert(list,k) end; table.sort(list)
+    for _,k in ipairs(list) do
+        local av=pa[k] or "<missing>"; local bv=pb[k] or "<missing>"; local different=av~=bv
+        local row=Instance.new("TextLabel",scroll); row.Size=UDim2.new(1,-5,0,34); row.BackgroundColor3=different and THEME.accentSoft or THEME.panel2; row.BorderSizePixel=0; row.Text=k.."\n  A: "..av.."    |    B: "..bv; row.TextColor3=THEME.text; row.TextSize=11; row.Font=Enum.Font.Code; row.TextXAlignment=Enum.TextXAlignment.Left; row.TextWrapped=true; row.ZIndex=28002; round(row,5)
+    end
+    setMainStatus("Comparing "..a.Name.." with "..b.Name, "success", 1)
+end
+
+function showHistory()
+    local existing=screenGui:FindFirstChild("InspectorHistory")
+    if existing then existing:Destroy() return end
+    local f=Instance.new("Frame",screenGui); f.Name="InspectorHistory"; f.Size=UDim2.fromOffset(430,430); f.Position=UDim2.new(.5,0,.5,0); f.AnchorPoint=Vector2.new(.5,.5); f.BackgroundColor3=THEME.bg; f.BorderSizePixel=0; f.ZIndex=27000; round(f,10); stroke(f,THEME.stroke,.05,1); gradient(f,90)
+    local h=Instance.new("TextLabel",f); h.Size=UDim2.new(1,-60,0,40); h.Position=UDim2.fromOffset(15,8); h.BackgroundTransparency=1; h.Text="SELECTION & EXPORT HISTORY"; h.TextColor3=THEME.text; h.TextSize=16; h.Font=Enum.Font.GothamBold; h.TextXAlignment=Enum.TextXAlignment.Left; h.ZIndex=27001
+    local c=Instance.new("TextButton",f); c.Size=UDim2.fromOffset(32,30); c.Position=UDim2.new(1,-42,0,8); c.Text="X"; c.TextColor3=THEME.text; c.BackgroundColor3=THEME.surface; c.BorderSizePixel=0; c.ZIndex=27001; round(c,5); c.Activated:Connect(function() f:Destroy() end)
+    local scroll=Instance.new("ScrollingFrame",f); scroll.Size=UDim2.new(1,-30,1,-62); scroll.Position=UDim2.fromOffset(15,52); scroll.BackgroundTransparency=1; scroll.BorderSizePixel=0; scroll.ScrollBarThickness=5; scroll.AutomaticCanvasSize=Enum.AutomaticSize.Y; scroll.ZIndex=27001
+    local layout=Instance.new("UIListLayout",scroll); layout.Padding=UDim.new(0,5)
+    local title=Instance.new("TextLabel",scroll); title.Size=UDim2.new(1,0,0,28); title.BackgroundTransparency=1; title.Text="RECENT SELECTIONS"; title.TextColor3=THEME.accent; title.Font=Enum.Font.GothamBold; title.TextSize=12; title.TextXAlignment=Enum.TextXAlignment.Left; title.ZIndex=27002
+    for i,inst in ipairs(recentInstances) do
+        if inst and inst.Parent then
+            local b=Instance.new("TextButton",scroll); b.Size=UDim2.new(1,0,0,34); b.BackgroundColor3=THEME.panel2; b.TextColor3=THEME.text; b.Text=tostring(i).."  "..inst.Name.."  ["..inst.ClassName.."]"; b.TextXAlignment=Enum.TextXAlignment.Left; b.TextSize=11; b.Font=Enum.Font.Gotham; b.BorderSizePixel=0; b.ZIndex=27002; round(b,5); local target=inst; b.Activated:Connect(function() showDetails(target); f:Destroy(); showToast("Selection restored", "success") end)
+        end
+    end
+    local title2=Instance.new("TextLabel",scroll); title2.Size=UDim2.new(1,0,0,28); title2.BackgroundTransparency=1; title2.Text="EXPORT HISTORY"; title2.TextColor3=THEME.accent; title2.Font=Enum.Font.GothamBold; title2.TextSize=12; title2.TextXAlignment=Enum.TextXAlignment.Left; title2.ZIndex=27002
+    for i=math.max(1,#exportHistory-9),#exportHistory do
+        local item=exportHistory[i]
+        if item then
+            local l=Instance.new("TextLabel",scroll); l.Size=UDim2.new(1,0,0,42); l.BackgroundColor3=THEME.panel2; l.TextColor3=THEME.text; l.Text=""..item.time.."  •  "..item.label.."\n   "..tostring(item.instances).." instances | "..string.format("%.2f KB",item.kb); l.TextSize=11; l.Font=Enum.Font.Gotham; l.TextXAlignment=Enum.TextXAlignment.Left; l.ZIndex=27002; round(l,5)
+        end
+    end
+end
+
 ------------------------------------------------------------
 -- TREE
 ------------------------------------------------------------
@@ -993,13 +1188,14 @@ end
 
 ------------------------------------------------------------
 
+local visibleTreeNodes = 0
 local function createNode(instance, depth)
-if currentSearch ~= "" then
-if not instanceMatches(instance)
-and not hasMatchingDescendant(instance) then
-return
-end
-end
+    visibleTreeNodes += 1
+    if visibleTreeNodes > MAX_VISIBLE_TREE_NODES then return end
+    if currentSearch ~= "" then
+        refreshSearchCache()
+        if not searchCache[instance] and not hasMatchingDescendant(instance) then return end
+    end
 
 local children = {}
 
@@ -1090,13 +1286,20 @@ end
 ------------------------------------------------------------
 
 function rebuildTree()
-clearTree()
-
-createNode(game, 0)
-
-task.defer(function()
-treeScroll.CanvasPosition = treeScroll.CanvasPosition
-end)
+    if treeRebuildQueued then return end
+    treeRebuildQueued = true
+    task.defer(function()
+        treeRebuildQueued = false
+        visibleTreeNodes = 0
+        refreshSearchCache()
+        clearTree()
+        createNode(game, 0)
+        if visibleTreeNodes > MAX_VISIBLE_TREE_NODES then
+            setMainStatus("Tree display limited to " .. tostring(MAX_VISIBLE_TREE_NODES) .. " visible nodes for performance", "warning", 1)
+            showToast("Tree display limited for performance", "warning", 2.5)
+        end
+        treeScroll.CanvasPosition = treeScroll.CanvasPosition
+    end)
 end
 
 ------------------------------------------------------------
@@ -1171,6 +1374,10 @@ scanned = {}
 instanceCount = 0
 attributeCount = 0
 selectedInstance = nil
+searchCache = {}
+searchCacheQuery = nil
+selectionHistory = {}
+historyCursor = 0
 
 setMainStatus("Scanning...", "working", 0)
 refreshStatusCounts()
@@ -2516,7 +2723,7 @@ local function showJSON()
 
     local optionsFrame = Instance.new("Frame")
     optionsFrame.Name = "ExportOptions"
-    optionsFrame.Size = UDim2.new(1, -30, 0, 112)
+    optionsFrame.Size = UDim2.new(1, -30, 0, 142)
     optionsFrame.Position = UDim2.new(0, 15, 0, 48)
     optionsFrame.BackgroundColor3 = Color3.fromRGB(32, 32, 32)
     optionsFrame.BorderSizePixel = 0
@@ -2544,6 +2751,7 @@ local function showJSON()
     searchInput.Parent = optionsFrame
 
     local checks = {}
+    local checkControls = {}
     local function makeCheck(text, x, y, default)
         local b = Instance.new("TextButton")
         b.Size = UDim2.fromOffset(155, 28)
@@ -2560,6 +2768,8 @@ local function showJSON()
         refresh()
         b.Activated:Connect(function() state = not state; refresh() end)
         checks[text] = function() return state end
+        checkControls = checkControls or {}
+        checkControls[text] = {get=function() return state end, set=function(v) state=v; refresh() end}
         return b
     end
 
@@ -2571,13 +2781,38 @@ local function showJSON()
         makeCheck("Include empty properties", 10, 75, false)
     }
 
+    local presetButton = Instance.new("TextButton")
+    presetButton.Size = UDim2.fromOffset(170, 28)
+    presetButton.Position = UDim2.new(1, -180, 0, 75)
+    presetButton.BackgroundColor3 = THEME.accentSoft
+    presetButton.TextColor3 = THEME.text
+    presetButton.Text = "Preset: Standard"
+    presetButton.TextSize = 12
+    presetButton.Font = Enum.Font.GothamMedium
+    presetButton.BorderSizePixel = 0
+    presetButton.ZIndex = 102
+    presetButton.Parent = optionsFrame
+    round(presetButton,5)
+    local presetNames={"Minimal","Standard","Complete"}; local presetIndex=2
+    presetButton.Activated:Connect(function()
+        presetIndex = presetIndex % #presetNames + 1
+        local name=presetNames[presetIndex]; local preset=exportPresets[name]
+        for text,value in pairs(preset) do
+            if checkControls[text] then checkControls[text].set(value) end
+        end
+        presetButton.Text="Preset: "..name
+        showToast("Preset applied: "..name, "success")
+    end)
+
     if jsonWidth < 520 then
-        optionsFrame.Size = UDim2.new(1, -30, 0, 158)
+        optionsFrame.Size = UDim2.new(1, -30, 0, 142)
         checkButtons[1].Position = UDim2.fromOffset(10, 45)
         checkButtons[2].Position = UDim2.fromOffset(160, 45)
         checkButtons[3].Position = UDim2.fromOffset(10, 75)
         checkButtons[4].Position = UDim2.fromOffset(160, 75)
         checkButtons[5].Position = UDim2.fromOffset(10, 105)
+        presetButton.Size = UDim2.fromOffset(150, 28)
+        presetButton.Position = UDim2.fromOffset(160, 105)
     end
 
     --====================================================
@@ -2591,7 +2826,7 @@ local function showJSON()
         UDim2.new(1, -30, 0, 25)
 
     statusLabel.Position =
-        UDim2.new(0, 15, 0, (jsonWidth < 520 and 215 or 170))
+        UDim2.new(0, 15, 0, (jsonWidth < 520 and 190 or 170))
 
     statusLabel.BackgroundTransparency = 1
     statusLabel.Text =
@@ -2622,7 +2857,7 @@ local function showJSON()
         UDim2.new(0.5, -20, 0, 25)
 
     recordLabel.Position =
-        UDim2.new(0, 15, 0, (jsonWidth < 520 and 243 or 198))
+        UDim2.new(0, 15, 0, (jsonWidth < 520 and 218 or 198))
 
     recordLabel.BackgroundTransparency = 1
     recordLabel.Text = "Records: 0"
@@ -2652,7 +2887,7 @@ local function showJSON()
         UDim2.new(0.5, -20, 0, 25)
 
     sizeLabel.Position =
-        UDim2.new(0.5, 0, 0, (jsonWidth < 520 and 243 or 198))
+        UDim2.new(0.5, 0, 0, (jsonWidth < 520 and 218 or 198))
 
     sizeLabel.BackgroundTransparency = 1
     sizeLabel.Text = "JSON Size: 0 KB"
@@ -2671,6 +2906,19 @@ local function showJSON()
     sizeLabel.ZIndex = 101
     sizeLabel.Parent = jsonGui
 
+    local validationLabel = Instance.new("TextLabel")
+    validationLabel.Size = UDim2.new(1, -30, 0, 22)
+    validationLabel.Position = UDim2.new(0, 15, 0, (jsonWidth < 520 and 244 or 220))
+    validationLabel.BackgroundTransparency = 1
+    validationLabel.Text = "Validation: waiting for export"
+    validationLabel.TextColor3 = THEME.muted
+    validationLabel.TextSize = 11
+    validationLabel.Font = Enum.Font.GothamMedium
+    validationLabel.TextXAlignment = Enum.TextXAlignment.Left
+    validationLabel.ZIndex = 101
+    validationLabel.Parent = jsonGui
+    local validationPassed = false
+
     --====================================================
     -- PREVIEW
     --====================================================
@@ -2684,7 +2932,7 @@ local function showJSON()
         UDim2.new(1, -30, 1, (jsonWidth < 520 and -325 or -280))
 
     previewBox.Position =
-        UDim2.new(0, 15, 0, (jsonWidth < 520 and 273 or 228))
+        UDim2.new(0, 15, 0, (jsonWidth < 520 and 248 or 228))
 
     previewBox.BackgroundColor3 =
         Color3.fromRGB(15, 15, 15)
@@ -2781,12 +3029,19 @@ local function showJSON()
                 if previewOK then previewText = previewResult end
             end
             previewBox.Text = previewText
+            local validationOK = decodeOK and type(decoded) == "table" and type(decoded.instances) == "table" and type(decoded.metadata) == "table" and type(decoded.statistics) == "table"
+            validationPassed = validationOK
+            validationLabel.Text = validationOK and ("✓ Validation passed  •  " .. tostring(info.total or 0) .. " instances checked") or "⚠ Validation warning — inspect JSON before upload"
+            validationLabel.TextColor3 = validationOK and Color3.fromRGB(120,220,150) or Color3.fromRGB(240,180,90)
             sizeLabel.Text = string.format("JSON Size: %.2f KB", #fullJSON/1024)
             recordLabel.Text = "Records: " .. tostring(jsonRecordCount)
             local readyText = (exportingSelected and "Selected export ready — " or "Export ready — ") .. tostring(info.total or 0) .. " instances | " .. tostring(info.attributes or 0) .. " attrs | " .. tostring(info.properties or 0) .. " props | " .. tostring(info.tags or 0) .. " tags"
             statusLabel.Text = readyText
             setMainStatus(readyText, "success", 1)
             showToast("JSON export complete — " .. tostring(info.total or 0) .. " instances", "success", 3)
+            lastExportInfo = info
+            table.insert(exportHistory, {time=os.date("%H:%M:%S"), label=exportingSelected and "Selected: "..exportSelection.Name or "All scanned", instances=info.total or 0, kb=#fullJSON/1024})
+            while #exportHistory > 20 do table.remove(exportHistory, 1) end
         end)
     end
 
@@ -2896,10 +3151,16 @@ local function showJSON()
     discordButton.MouseButton1Click:Connect(function()
 
         if fullJSON == "" then
+            discordButton.Text = "Generate First"
+            showToast("Generate JSON before uploading", "warning")
+            return
+        end
 
-            discordButton.Text =
-                "Generate First"
-
+        if not validationPassed then
+            discordButton.Text = "Validate First"
+            setMainStatus("Upload blocked — JSON validation has not passed", "warning")
+            showToast("Validate the generated JSON before uploading", "warning", 3)
+            task.delay(1.5, function() if discordButton.Parent then discordButton.Text = "Upload to Discord" end end)
             return
         end
 
@@ -3090,14 +3351,14 @@ local title=Instance.new("TextLabel",f); title.Size=UDim2.new(1,-50,0,38); title
 local close=Instance.new("TextButton",f); close.Size=UDim2.fromOffset(30,28); close.Position=UDim2.new(1,-40,0,8); close.Text="X"; close.BackgroundColor3=THEME.surface; close.TextColor3=THEME.text; close.BorderSizePixel=0; close.ZIndex=26001; round(close,5); close.Activated:Connect(function() f:Destroy() end)
 local input=Instance.new("TextBox",f); input.Size=UDim2.new(1,-24,0,30); input.Position=UDim2.fromOffset(12,45); input.PlaceholderText="Filter classes..."; input.Text=""; input.TextColor3=THEME.text; input.PlaceholderColor3=THEME.muted; input.BackgroundColor3=THEME.surface; input.BorderSizePixel=0; input.ZIndex=26001; round(input,5)
 local clear=Instance.new("TextButton",f); clear.Size=UDim2.new(1,-24,0,28); clear.Position=UDim2.fromOffset(12,80); clear.Text="All classes"; clear.TextColor3=THEME.text; clear.BackgroundColor3=THEME.accentSoft; clear.BorderSizePixel=0; clear.ZIndex=26001; round(clear,5)
-clear.Activated:Connect(function() classFilter=""; rebuildTree(); f:Destroy() end)
+clear.Activated:Connect(function() classFilter=""; searchCacheQuery=nil; rebuildTree(); f:Destroy(); showToast("Class filter cleared", "success") end)
 local scroll=Instance.new("ScrollingFrame",f); scroll.Size=UDim2.new(1,-24,1,-118); scroll.Position=UDim2.fromOffset(12,115); scroll.BackgroundTransparency=1; scroll.BorderSizePixel=0; scroll.ScrollBarThickness=5; scroll.ZIndex=26001
 local lay=Instance.new("UIListLayout",scroll); lay.Padding=UDim.new(0,3)
 local classes={}; for inst in pairs(scanned) do classes[inst.ClassName]=true end; local list={}; for k in pairs(classes) do table.insert(list,k) end; table.sort(list)
 local function refreshList()
  for _,ch in ipairs(scroll:GetChildren()) do if not ch:IsA("UIListLayout") then ch:Destroy() end end
  local q=string.lower(input.Text)
- for _,cls in ipairs(list) do if q=="" or string.find(string.lower(cls),q,1,true) then local b=Instance.new("TextButton",scroll); b.Size=UDim2.new(1,-4,0,28); b.Text=cls; b.TextColor3=THEME.text; b.BackgroundColor3=(string.lower(classFilter)==string.lower(cls) and THEME.accentSoft or THEME.surface); b.BorderSizePixel=0; b.ZIndex=26002; round(b,5); b.Activated:Connect(function() classFilter=cls; rebuildTree(); f:Destroy() end) end end
+ for _,cls in ipairs(list) do if q=="" or string.find(string.lower(cls),q,1,true) then local b=Instance.new("TextButton",scroll); b.Size=UDim2.new(1,-4,0,28); b.Text=cls; b.TextColor3=THEME.text; b.BackgroundColor3=(string.lower(classFilter)==string.lower(cls) and THEME.accentSoft or THEME.surface); b.BorderSizePixel=0; b.ZIndex=26002; round(b,5); b.Activated:Connect(function() classFilter=cls; searchCacheQuery=nil; rebuildTree(); f:Destroy(); showToast("Class filter: " .. cls, "success") end) end end
 end
 input:GetPropertyChangedSignal("Text"):Connect(refreshList); refreshList()
 end
@@ -3305,9 +3566,43 @@ end)
 
 ------------------------------------------------------------
 
+backButton.MouseButton1Click:Connect(function()
+    if historyCursor > 1 then
+        historyCursor -= 1
+        local target = selectionHistory[historyCursor]
+        if target and target.Parent then historyNavigating = true; showDetails(target); historyNavigating = false; setMainStatus("History: previous selection", "success", 1); showToast("Previous selection", "success") end
+    end
+end)
+
+forwardButton.MouseButton1Click:Connect(function()
+    if historyCursor < #selectionHistory then
+        historyCursor += 1
+        local target = selectionHistory[historyCursor]
+        if target and target.Parent then historyNavigating = true; showDetails(target); historyNavigating = false; setMainStatus("History: next selection", "success", 1); showToast("Next selection", "success") end
+    end
+end)
+
 jsonButton.MouseButton1Click:Connect(function()
 showJSON()
 end)
+
+compareButton.MouseButton1Click:Connect(function()
+    if not selectedInstance then showToast("Select an instance first", "warning"); return end
+    if not compareInstance then
+        compareInstance = selectedInstance
+        compareButton.Text = "Compare ✓"
+        setMainStatus("Comparison source set: " .. selectedInstance.Name, "success", 1)
+        showToast("Comparison source selected", "success")
+    elseif compareInstance == selectedInstance then
+        compareInstance = nil
+        compareButton.Text = "Compare"
+        showToast("Comparison cleared", "ready")
+    else
+        showCompare(compareInstance, selectedInstance)
+    end
+end)
+
+historyButton.MouseButton1Click:Connect(function() showHistory() end)
 
 statsButton.MouseButton1Click:Connect(function()
 setMainStatus("Opening export statistics...", "working")
@@ -3327,19 +3622,14 @@ end)
 
 searchBox:GetPropertyChangedSignal("Text"):Connect(function()
 currentSearch = searchBox.Text
-
+searchCacheQuery = nil
+refreshSearchCache()
 rebuildTree()
-
-local q = string.lower(currentSearch)
-if q == "" and classFilter == "" then
+local matches = 0
+for inst, matched in pairs(searchCache) do if matched then matches += 1 end end
+if currentSearch == "" and classFilter == "" then
     setMainStatus("Ready", "ready")
 else
-    local matches = 0
-    for inst in pairs(scanned) do
-        local classOK = classFilter == "" or string.lower(inst.ClassName) == string.lower(classFilter)
-        local text = string.lower(inst.Name .. " " .. inst.ClassName .. " " .. getPath(inst))
-        if classOK and (q == "" or string.find(text, q, 1, true)) then matches += 1 end
-    end
     setMainStatus("Filter: " .. tostring(matches) .. " matching instance" .. (matches == 1 and "" or "s"), "ready")
 end
 end)
@@ -3368,7 +3658,7 @@ searchBox.Size = UDim2.new(0.32, 0, 0, 30)
 searchBox.Position = UDim2.new(0.43, 0, 0, 8)
 searchBox.TextSize = 11
 
-toolbar.Size = UDim2.new(1, -20, 0, 76)
+toolbar.Size = UDim2.new(1, -20, 0, 114)
 statusLabel.Visible = false
 statusBar.Size = UDim2.new(1, -20, 0, 26)
 statusBar.Position = UDim2.new(0, 10, 1, -34)
@@ -3382,12 +3672,20 @@ collapseButton.Size = UDim2.fromOffset(mobileButtonWidth, 32)
 jsonButton.Size = UDim2.fromOffset(mobileButtonWidth, 32)
 statsButton.Size = UDim2.fromOffset(mobileButtonWidth, 32)
 filterButton.Size = UDim2.fromOffset(mobileButtonWidth, 32)
+backButton.Size = UDim2.fromOffset(mobileButtonWidth, 32)
+forwardButton.Size = UDim2.fromOffset(mobileButtonWidth, 32)
+compareButton.Size = UDim2.fromOffset(mobileButtonWidth, 32)
+historyButton.Size = UDim2.fromOffset(mobileButtonWidth, 32)
 rescanButton.Position = UDim2.fromOffset(0, 0)
 expandButton.Position = UDim2.fromOffset(mobileButtonWidth + 5, 0)
 collapseButton.Position = UDim2.fromOffset((mobileButtonWidth + 5) * 2, 0)
 jsonButton.Position = UDim2.fromOffset((mobileButtonWidth + 5) * 3, 0)
 statsButton.Position = UDim2.fromOffset((mobileButtonWidth + 5) * 4, 0)
 filterButton.Position = UDim2.fromOffset((mobileButtonWidth + 5) * 5, 0)
+backButton.Position = UDim2.fromOffset(0, 38)
+forwardButton.Position = UDim2.fromOffset(mobileButtonWidth + 5, 38)
+compareButton.Position = UDim2.fromOffset((mobileButtonWidth + 5) * 2, 38)
+historyButton.Position = UDim2.fromOffset((mobileButtonWidth + 5) * 3, 38)
 rescanButton.Text = "Rescan"
 expandButton.Text = "Expand"
 collapseButton.Text = "Collapse"
@@ -3396,10 +3694,10 @@ statsButton.Text = "Stats"
 filterButton.Text = "Class"
 
 treeFrame.Size = UDim2.new(1, -20, 0.41, 0)
-treeFrame.Position = UDim2.new(0, 10, 0, 108)
+treeFrame.Position = UDim2.new(0, 10, 0, 146)
 
 detailsFrame.Size = UDim2.new(1, -20, 0.41, 0)
-detailsFrame.Position = UDim2.new(0, 10, 0.50, 0)
+detailsFrame.Position = UDim2.new(0, 10, 0.53, 0)
 else
 mainFrame.Size = UDim2.new(0.94, 0, 0.88, 0)
 mainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
@@ -3413,6 +3711,8 @@ searchBox.TextSize = 13
 
 toolbar.Size = UDim2.new(1, -20, 0, 38)
 statusLabel.Visible = true
+statusLabel.Size = UDim2.new(1, -790, 0, 32)
+statusLabel.Position = UDim2.fromOffset(780, 0)
 statusBar.Size = UDim2.new(1, -20, 0, 28)
 statusBar.Position = UDim2.new(0, 10, 1, -38)
 statusCountLabel.Visible = true
@@ -3430,6 +3730,14 @@ collapseButton.Position = UDim2.fromOffset(190, 0)
 jsonButton.Position = UDim2.fromOffset(300, 0)
 statsButton.Position = UDim2.fromOffset(380, 0)
 filterButton.Position = UDim2.fromOffset(460, 0)
+backButton.Size = UDim2.fromOffset(34, 32)
+forwardButton.Size = UDim2.fromOffset(34, 32)
+compareButton.Size = UDim2.fromOffset(72, 32)
+historyButton.Size = UDim2.fromOffset(72, 32)
+backButton.Position = UDim2.fromOffset(540, 0)
+forwardButton.Position = UDim2.fromOffset(580, 0)
+compareButton.Position = UDim2.fromOffset(620, 0)
+historyButton.Position = UDim2.fromOffset(700, 0)
 rescanButton.Text = "Rescan"
 expandButton.Text = "Expand All"
 collapseButton.Text = "Collapse All"
