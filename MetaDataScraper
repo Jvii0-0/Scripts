@@ -53,6 +53,11 @@ local scanGeneration = 0
 
 local connections = {}
 
+local favorites = {}
+local recentInstances = {}
+local classFilter = ""
+local lastExportInfo = nil
+
 ------------------------------------------------------------
 -- GUI
 ------------------------------------------------------------
@@ -352,13 +357,27 @@ UDim2.fromOffset(300, 0),
 70
 )
 
+local statsButton = createButton(
+"Stats",
+"Stats",
+UDim2.fromOffset(380, 0),
+70
+)
+
+local filterButton = createButton(
+"Filter",
+"Class",
+UDim2.fromOffset(460, 0),
+70
+)
+
 ------------------------------------------------------------
 -- STATUS
 ------------------------------------------------------------
 
 local statusLabel = Instance.new("TextLabel")
 statusLabel.Name = "Status"
-statusLabel.Size = UDim2.new(1, -380, 0, 32)
+statusLabel.Size = UDim2.new(1, -540, 0, 32)
 statusLabel.Position = UDim2.fromOffset(385, 0)
 
 statusLabel.BackgroundTransparency = 1
@@ -598,6 +617,10 @@ end
 ------------------------------------------------------------
 
 local function instanceMatches(instance)
+if classFilter ~= "" and string.lower(instance.ClassName) ~= string.lower(classFilter) then
+return false
+end
+
 if currentSearch == "" then
 return true
 end
@@ -698,42 +721,124 @@ addDetail("Select an Instance to view its information.", 45)
 return
 end
 
-local attributes = getAttributes(instance)
+-- Track recent selections without duplicating entries.
+for i = #recentInstances, 1, -1 do
+if recentInstances[i] == instance then table.remove(recentInstances, i) end
+end
+table.insert(recentInstances, 1, instance)
+while #recentInstances > 8 do table.remove(recentInstances) end
 
+local function section(title)
+local label = addDetail("▼ " .. title, 30)
+label.BackgroundColor3 = THEME.surface
+label.TextColor3 = THEME.accent
+label.Font = Enum.Font.GothamBold
+return label
+end
+
+local function actionButton(text, callback)
+local b = Instance.new("TextButton")
+b.Size = UDim2.new(1, -10, 0, 30)
+b.BackgroundColor3 = THEME.surface
+b.TextColor3 = THEME.text
+b.Text = text
+b.TextSize = 12
+b.Font = Enum.Font.GothamMedium
+b.BorderSizePixel = 0
+b.ZIndex = 103
+b.Parent = detailsScroll
+round(b, 5)
+stroke(b, THEME.stroke, 0.35, 1)
+b.MouseEnter:Connect(function() b.BackgroundColor3 = THEME.surfaceHover end)
+b.MouseLeave:Connect(function() b.BackgroundColor3 = THEME.surface end)
+b.Activated:Connect(callback)
+return b
+end
+
+section("INSTANCE")
 addDetail("Name: " .. instance.Name)
 addDetail("Class: " .. instance.ClassName)
-addDetail("Path: " .. getPath(instance), 45)
+addDetail("Path: " .. getPath(instance), 48)
+
+local parent = instance.Parent
+addDetail("Parent: " .. (parent and getPath(parent) or "nil"), 42)
+addDetail("Favorite: " .. (favorites[instance] and "Yes" or "No"))
 
 local children = 0
-
-pcall(function()
-children = #instance:GetChildren()
-end)
-
-addDetail("Children: " .. tostring(children))
+local descendants = 0
+pcall(function() children = #instance:GetChildren() end)
+pcall(function() descendants = #instance:GetDescendants() end)
+addDetail("Children: " .. tostring(children) .. "   |   Descendants: " .. tostring(descendants))
 addDetail("Attributes: " .. tostring(getAttributeCount(instance)))
 
-if next(attributes) then
-addDetail("ATTRIBUTE VALUES", 30)
+section("QUICK ACTIONS")
+actionButton(favorites[instance] and "★ Remove Favorite" or "☆ Add Favorite", function()
+ favorites[instance] = not favorites[instance]
+ showDetails(instance)
+end)
+actionButton("Copy Path", function()
+ local path = getPath(instance)
+ if setclipboard then pcall(function() setclipboard(path) end) end
+ statusLabel.Text = "Path copied: " .. path
+end)
+actionButton("Copy Class", function()
+ if setclipboard then pcall(function() setclipboard(instance.ClassName) end) end
+ statusLabel.Text = "Class copied: " .. instance.ClassName
+end)
+actionButton("Copy JSON", function()
+ local ok, encoded = pcall(function()
+  return HttpService:JSONEncode({path=getPath(instance), name=instance.Name, className=instance.ClassName, attributes=getAttributes(instance)})
+ end)
+ if ok and setclipboard then pcall(function() setclipboard(encoded) end) end
+ statusLabel.Text = ok and "Instance JSON copied." or "Could not encode instance."
+end)
+actionButton("Export Subtree", function()
+ jsonButton:Activate()
+end)
 
-for name, value in pairs(attributes) do
-local valueText = tostring(value)
+section("TRANSFORM")
+local okCF, cf = pcall(function() return instance:IsA("BasePart") and instance.CFrame or nil end)
+if okCF and cf then
+ addDetail(string.format("Position: %.3f, %.3f, %.3f", cf.Position.X, cf.Position.Y, cf.Position.Z), 36)
+ addDetail(string.format("Rotation: %.1f°, %.1f°, %.1f°", cf:ToOrientation()), 36)
+ addDetail("Size: " .. tostring(instance.Size), 36)
+else
+ local okAtt, attCF = pcall(function() return instance:IsA("Attachment") and instance.CFrame or nil end)
+ if okAtt and attCF then addDetail("Attachment CFrame: " .. tostring(attCF), 42) else addDetail("No transform data.", 35) end
+end
 
-local text =
-tostring(name)
-.. " = "
-.. valueText
-.. "  ["
-.. typeof(value)
-.. "]"
-
-addDetail(text, 42)
+section("ATTRIBUTES")
+local attributes = getAttributes(instance)
+local attributeNames = {}
+for name in pairs(attributes) do table.insert(attributeNames, tostring(name)) end
+table.sort(attributeNames)
+if #attributeNames > 0 then
+for _, name in ipairs(attributeNames) do
+ local value = attributes[name]
+ addDetail(name .. " = " .. tostring(value) .. "  [" .. typeof(value) .. "]", 42)
 end
 else
-addDetail("No attributes.", 35)
-end
+ addDetail("No attributes.", 35)
 end
 
+section("TAGS")
+local tags = {}
+pcall(function() tags = CollectionService:GetTags(instance) end)
+table.sort(tags)
+if #tags > 0 then
+ addDetail(table.concat(tags, "  •  "), 42)
+else
+ addDetail("No CollectionService tags.", 35)
+end
+
+section("RECENT SELECTIONS")
+for i = 1, math.min(#recentInstances, 5) do
+ local recent = recentInstances[i]
+ if recent and recent.Parent then
+  actionButton(tostring(i) .. ". " .. recent.Name .. "  [" .. recent.ClassName .. "]", function() showDetails(recent) end)
+ end
+end
+end
 ------------------------------------------------------------
 -- TREE
 ------------------------------------------------------------
@@ -2776,6 +2881,65 @@ local function showJSON()
 end
 
 
+--========================================================
+-- STATS WINDOW
+--========================================================
+local function showStats()
+local existing = screenGui:FindFirstChild("InspectorStats")
+if existing then existing:Destroy() return end
+local f = Instance.new("Frame")
+f.Name = "InspectorStats"
+f.Size = UDim2.fromOffset(430, 390)
+f.Position = UDim2.new(0.5,0,0.5,0)
+f.AnchorPoint = Vector2.new(0.5,0.5)
+f.BackgroundColor3 = THEME.bg
+f.BorderSizePixel = 0
+f.ZIndex = 25000
+f.Parent = screenGui
+round(f,10); stroke(f,THEME.stroke,0.05,1.2); gradient(f,90)
+local h=Instance.new("TextLabel",f); h.Size=UDim2.new(1,-60,0,40); h.Position=UDim2.fromOffset(15,8); h.BackgroundTransparency=1; h.Text="EXPORT STATISTICS"; h.TextColor3=THEME.text; h.TextSize=17; h.Font=Enum.Font.GothamBold; h.TextXAlignment=Enum.TextXAlignment.Left; h.ZIndex=25001
+local c=Instance.new("TextButton",f); c.Size=UDim2.fromOffset(32,30); c.Position=UDim2.new(1,-42,0,8); c.Text="X"; c.TextColor3=THEME.text; c.BackgroundColor3=THEME.surface; c.BorderSizePixel=0; c.ZIndex=25001; round(c,5); c.Activated:Connect(function() f:Destroy() end)
+local scroll=Instance.new("ScrollingFrame",f); scroll.Size=UDim2.new(1,-30,1,-62); scroll.Position=UDim2.fromOffset(15,52); scroll.BackgroundTransparency=1; scroll.BorderSizePixel=0; scroll.ScrollBarThickness=5; scroll.AutomaticCanvasSize=Enum.AutomaticSize.Y; scroll.ZIndex=25001
+local layout=Instance.new("UIListLayout",scroll); layout.Padding=UDim.new(0,5)
+local function row(text)
+ local l=Instance.new("TextLabel",scroll); l.Size=UDim2.new(1,0,0,30); l.BackgroundColor3=THEME.panel2; l.BorderSizePixel=0; l.Text=text; l.TextColor3=THEME.text; l.TextSize=13; l.Font=Enum.Font.Gotham; l.TextXAlignment=Enum.TextXAlignment.Left; l.ZIndex=25002; round(l,5); local pad=Instance.new("UIPadding",l); pad.PaddingLeft=UDim.new(0,10)
+end
+local classCounts={}; local totalAttrs=0; local totalTags=0; local maxDepth=0
+for inst in pairs(scanned) do
+ classCounts[inst.ClassName]=(classCounts[inst.ClassName] or 0)+1
+ totalAttrs += getAttributeCount(inst)
+ local tags={}; pcall(function() tags=CollectionService:GetTags(inst) end); totalTags += #tags
+ local depth=0; local cur=inst; while cur and cur~=game do depth+=1; cur=cur.Parent end; if depth>maxDepth then maxDepth=depth end
+end
+row("Instances: "..tostring(instanceCount)); row("Attributes: "..tostring(totalAttrs)); row("Tags: "..tostring(totalTags)); row("Max hierarchy depth: "..tostring(maxDepth)); row("Favorites: "..tostring((function() local n=0 for i in pairs(favorites) do if scanned[i] then n+=1 end end return n end)()))
+local names={}; for k in pairs(classCounts) do table.insert(names,k) end; table.sort(names,function(a,b) return classCounts[a]>classCounts[b] end)
+row("CLASS BREAKDOWN")
+for _,k in ipairs(names) do row(k.."  —  "..tostring(classCounts[k])) end
+end
+
+--========================================================
+-- CLASS FILTER
+--========================================================
+local function showClassFilter()
+local existing=screenGui:FindFirstChild("InspectorClassFilter")
+if existing then existing:Destroy() return end
+local f=Instance.new("Frame",screenGui); f.Name="InspectorClassFilter"; f.Size=UDim2.fromOffset(300,360); f.Position=UDim2.new(0.5,0,0.5,0); f.AnchorPoint=Vector2.new(.5,.5); f.BackgroundColor3=THEME.bg; f.BorderSizePixel=0; f.ZIndex=26000; round(f,9); stroke(f,THEME.stroke,.1,1)
+local title=Instance.new("TextLabel",f); title.Size=UDim2.new(1,-50,0,38); title.Position=UDim2.fromOffset(12,5); title.BackgroundTransparency=1; title.Text="CLASS FILTER"; title.TextColor3=THEME.text; title.TextSize=16; title.Font=Enum.Font.GothamBold; title.TextXAlignment=Enum.TextXAlignment.Left; title.ZIndex=26001
+local close=Instance.new("TextButton",f); close.Size=UDim2.fromOffset(30,28); close.Position=UDim2.new(1,-40,0,8); close.Text="X"; close.BackgroundColor3=THEME.surface; close.TextColor3=THEME.text; close.BorderSizePixel=0; close.ZIndex=26001; round(close,5); close.Activated:Connect(function() f:Destroy() end)
+local input=Instance.new("TextBox",f); input.Size=UDim2.new(1,-24,0,30); input.Position=UDim2.fromOffset(12,45); input.PlaceholderText="Filter classes..."; input.Text=""; input.TextColor3=THEME.text; input.PlaceholderColor3=THEME.muted; input.BackgroundColor3=THEME.surface; input.BorderSizePixel=0; input.ZIndex=26001; round(input,5)
+local clear=Instance.new("TextButton",f); clear.Size=UDim2.new(1,-24,0,28); clear.Position=UDim2.fromOffset(12,80); clear.Text="All classes"; clear.TextColor3=THEME.text; clear.BackgroundColor3=THEME.accentSoft; clear.BorderSizePixel=0; clear.ZIndex=26001; round(clear,5)
+clear.Activated:Connect(function() classFilter=""; rebuildTree(); f:Destroy() end)
+local scroll=Instance.new("ScrollingFrame",f); scroll.Size=UDim2.new(1,-24,1,-118); scroll.Position=UDim2.fromOffset(12,115); scroll.BackgroundTransparency=1; scroll.BorderSizePixel=0; scroll.ScrollBarThickness=5; scroll.ZIndex=26001
+local lay=Instance.new("UIListLayout",scroll); lay.Padding=UDim.new(0,3)
+local classes={}; for inst in pairs(scanned) do classes[inst.ClassName]=true end; local list={}; for k in pairs(classes) do table.insert(list,k) end; table.sort(list)
+local function refreshList()
+ for _,ch in ipairs(scroll:GetChildren()) do if not ch:IsA("UIListLayout") then ch:Destroy() end end
+ local q=string.lower(input.Text)
+ for _,cls in ipairs(list) do if q=="" or string.find(string.lower(cls),q,1,true) then local b=Instance.new("TextButton",scroll); b.Size=UDim2.new(1,-4,0,28); b.Text=cls; b.TextColor3=THEME.text; b.BackgroundColor3=(string.lower(classFilter)==string.lower(cls) and THEME.accentSoft or THEME.surface); b.BorderSizePixel=0; b.ZIndex=26002; round(b,5); b.Activated:Connect(function() classFilter=cls; rebuildTree(); f:Destroy() end) end end
+end
+input:GetPropertyChangedSignal("Text"):Connect(refreshList); refreshList()
+end
+
 -- EXPAND / COLLAPSE
 ------------------------------------------------------------
 
@@ -2972,6 +3136,14 @@ jsonButton.MouseButton1Click:Connect(function()
 showJSON()
 end)
 
+statsButton.MouseButton1Click:Connect(function()
+showStats()
+end)
+
+filterButton.MouseButton1Click:Connect(function()
+showClassFilter()
+end)
+
 ------------------------------------------------------------
 -- SEARCH EVENT
 ------------------------------------------------------------
@@ -3010,19 +3182,25 @@ toolbar.Size = UDim2.new(1, -20, 0, 76)
 statusLabel.Visible = false
 
 -- Compact four-button mobile toolbar
-local mobileButtonWidth = math.floor((math.max(260, viewport.X * 0.94) - 35) / 4)
+local mobileButtonWidth = math.floor((math.max(260, viewport.X * 0.94) - 55) / 6)
 rescanButton.Size = UDim2.fromOffset(mobileButtonWidth, 32)
 expandButton.Size = UDim2.fromOffset(mobileButtonWidth, 32)
 collapseButton.Size = UDim2.fromOffset(mobileButtonWidth, 32)
 jsonButton.Size = UDim2.fromOffset(mobileButtonWidth, 32)
+statsButton.Size = UDim2.fromOffset(mobileButtonWidth, 32)
+filterButton.Size = UDim2.fromOffset(mobileButtonWidth, 32)
 rescanButton.Position = UDim2.fromOffset(0, 0)
 expandButton.Position = UDim2.fromOffset(mobileButtonWidth + 5, 0)
 collapseButton.Position = UDim2.fromOffset((mobileButtonWidth + 5) * 2, 0)
 jsonButton.Position = UDim2.fromOffset((mobileButtonWidth + 5) * 3, 0)
+statsButton.Position = UDim2.fromOffset((mobileButtonWidth + 5) * 4, 0)
+filterButton.Position = UDim2.fromOffset((mobileButtonWidth + 5) * 5, 0)
 rescanButton.Text = "Rescan"
 expandButton.Text = "Expand"
 collapseButton.Text = "Collapse"
 jsonButton.Text = "JSON"
+statsButton.Text = "Stats"
+filterButton.Text = "Class"
 
 treeFrame.Size = UDim2.new(1, -20, 0.43, 0)
 treeFrame.Position = UDim2.new(0, 10, 0, 108)
@@ -3048,14 +3226,20 @@ rescanButton.Size = UDim2.fromOffset(80, 32)
 expandButton.Size = UDim2.fromOffset(90, 32)
 collapseButton.Size = UDim2.fromOffset(100, 32)
 jsonButton.Size = UDim2.fromOffset(70, 32)
+statsButton.Size = UDim2.fromOffset(70, 32)
+filterButton.Size = UDim2.fromOffset(70, 32)
 rescanButton.Position = UDim2.fromOffset(0, 0)
 expandButton.Position = UDim2.fromOffset(90, 0)
 collapseButton.Position = UDim2.fromOffset(190, 0)
 jsonButton.Position = UDim2.fromOffset(300, 0)
+statsButton.Position = UDim2.fromOffset(380, 0)
+filterButton.Position = UDim2.fromOffset(460, 0)
 rescanButton.Text = "Rescan"
 expandButton.Text = "Expand All"
 collapseButton.Text = "Collapse All"
 jsonButton.Text = "JSON"
+statsButton.Text = "Stats"
+filterButton.Text = "Class"
 
 treeFrame.Size = UDim2.new(0.52, -15, 1, -108)
 treeFrame.Position = UDim2.fromOffset(10, 101)
@@ -3070,6 +3254,22 @@ updateMobileLayout()
 if workspace.CurrentCamera then
 workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updateMobileLayout)
 end
+
+------------------------------------------------------------
+-- KEYBOARD SHORTCUTS
+------------------------------------------------------------
+UserInputService.InputBegan:Connect(function(input, processed)
+if processed then return end
+if input.KeyCode == Enum.KeyCode.F and mainFrame.Visible then
+searchBox:CaptureFocus()
+elseif input.KeyCode == Enum.KeyCode.Escape then
+if screenGui:FindFirstChild("JSONExportWindow") then
+ local j=screenGui:FindFirstChild("JSONExportWindow"); local o=screenGui:FindFirstChild("JSONOverlay"); if o then o:Destroy() end; if j then j:Destroy() end
+end
+if screenGui:FindFirstChild("InspectorStats") then screenGui.InspectorStats:Destroy() end
+if screenGui:FindFirstChild("InspectorClassFilter") then screenGui.InspectorClassFilter:Destroy() end
+end
+end)
 
 ------------------------------------------------------------
 -- INITIALIZE
