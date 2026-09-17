@@ -11,7 +11,6 @@ Features:
 • Rescan
 • Expand All / Collapse All
 • JSON export
-• Compare instances
 • Instance limit + yielding for performance
 
 This does NOT bypass Roblox replication/security.
@@ -48,6 +47,7 @@ local attributeCount = 0
 
 local selectedInstance = nil
 local currentSearch = ""
+local propertySearch = ""
 
 local scanInProgress = false
 local scanGeneration = 0
@@ -56,14 +56,12 @@ local connections = {}
 
 local classFilter = ""
 local lastExportInfo = nil
-local selectionHistory = {}
-local historyCursor = 0
-local historyNavigating = false
-local compareInstance = nil
 local searchCache = {}
 local searchCacheQuery = nil
 local treeRebuildQueued = false
 local MAX_VISIBLE_TREE_NODES = 5000
+local treeNodeCount = 0
+local treeRows = {}
 
 ------------------------------------------------------------
 -- GUI
@@ -225,22 +223,6 @@ subtitleLabel.TextXAlignment = Enum.TextXAlignment.Left
 subtitleLabel.ZIndex = 102
 subtitleLabel.Parent = titleBar
 
-local liveBadge = Instance.new("TextLabel")
-liveBadge.Name = "LiveBadge"
-liveBadge.Size = UDim2.fromOffset(48, 22)
-liveBadge.Position = UDim2.new(1, -92, 0, 14)
-liveBadge.BackgroundColor3 = Color3.fromRGB(30, 68, 49)
-liveBadge.TextColor3 = Color3.fromRGB(135, 240, 165)
-liveBadge.Text = "● LIVE"
-liveBadge.TextSize = 9
-liveBadge.Font = Enum.Font.GothamBold
-liveBadge.BorderSizePixel = 0
-liveBadge.ZIndex = 104
-liveBadge.Parent = titleBar
-round(liveBadge, 11)
-
-local liveStroke = stroke(liveBadge, Color3.fromRGB(70, 150, 100), 0.35, 1)
-
 local closeButton = Instance.new("TextButton")
 closeButton.Name = "CloseButton"
 closeButton.Size = UDim2.fromOffset(34, 32)
@@ -378,9 +360,6 @@ UDim2.fromOffset(460, 0),
 70
 )
 
-local backButton = createButton("Back", "‹", UDim2.fromOffset(540, 0), 34)
-local forwardButton = createButton("Forward", "›", UDim2.fromOffset(580, 0), 34)
-local compareButton = createButton("Compare", "Compare", UDim2.fromOffset(620, 0), 72)
 
 ------------------------------------------------------------
 -- STATUS
@@ -388,8 +367,8 @@ local compareButton = createButton("Compare", "Compare", UDim2.fromOffset(620, 0
 
 local statusLabel = Instance.new("TextLabel")
 statusLabel.Name = "Status"
-statusLabel.Size = UDim2.new(1, -710, 0, 32)
-statusLabel.Position = UDim2.fromOffset(710, 0)
+statusLabel.Size = UDim2.new(1, -625, 0, 32)
+statusLabel.Position = UDim2.fromOffset(625, 0)
 
 statusLabel.BackgroundTransparency = 1
 statusLabel.TextColor3 = THEME.muted
@@ -868,10 +847,53 @@ local function hasMatchingDescendant(instance)
     return false
 end
 
+-- DISPLAY HELPERS
+------------------------------------------------------------
+
+local function formatDisplayValue(value)
+    local valueType = typeof(value)
+    if value == nil then return "nil" end
+    if valueType == "string" then return string.format("%q", value) end
+    if valueType == "number" then return string.format("%.6g", value) end
+    if valueType == "boolean" then return tostring(value) end
+    if valueType == "Vector3" then return string.format("(%.3f, %.3f, %.3f)", value.X, value.Y, value.Z) end
+    if valueType == "Vector2" then return string.format("(%.3f, %.3f)", value.X, value.Y) end
+    if valueType == "Color3" then return string.format("RGB(%d, %d, %d)", math.floor(value.R*255+0.5), math.floor(value.G*255+0.5), math.floor(value.B*255+0.5)) end
+    if valueType == "CFrame" then local p=value.Position; return string.format("CFrame(%.2f, %.2f, %.2f)",p.X,p.Y,p.Z) end
+    if valueType == "UDim2" then return string.format("{%s,%d},{%s,%d}",tostring(value.X.Scale),value.X.Offset,tostring(value.Y.Scale),value.Y.Offset) end
+    if valueType == "UDim" then return string.format("{%s,%d}",tostring(value.Scale),value.Offset) end
+    if valueType == "BrickColor" then return value.Name .. " (#" .. tostring(value.Number) .. ")" end
+    if valueType == "EnumItem" then return tostring(value.EnumType) .. "." .. value.Name end
+    if valueType == "Instance" then return value.Name .. " <" .. value.ClassName .. ">" end
+    return tostring(value)
+end
+
+local function getClassIcon(instance)
+    local c = instance.ClassName
+    if instance:IsA("BasePart") then return "■" end
+    if instance:IsA("Model") then return "◇" end
+    if instance:IsA("Folder") then return "▣" end
+    if instance:IsA("GuiObject") then return "▤" end
+    if instance:IsA("ValueBase") then return "◈" end
+    if instance:IsA("Constraint") then return "⌁" end
+    if instance:IsA("Sound") then return "♫" end
+    if instance:IsA("Light") then return "☼" end
+    if instance:IsA("ParticleEmitter") or instance:IsA("Beam") or instance:IsA("Trail") then return "✦" end
+    if c == "Camera" then return "◉" end
+    if c == "Humanoid" then return "♙" end
+    if c == "Script" or c == "LocalScript" or c == "ModuleScript" then return "{}" end
+    return "•"
+end
+
 -- DETAILS
 ------------------------------------------------------------
 
+local detailSections = {}
+local currentDetailSection = nil
+
 local function clearDetails()
+detailSections = {}
+currentDetailSection = nil
 for _, child in ipairs(detailsScroll:GetChildren()) do
 if not child:IsA("UIListLayout") then
 child:Destroy()
@@ -901,6 +923,7 @@ label.BorderSizePixel = 0
 
 label.ZIndex = 13
 label.Parent = detailsScroll
+if currentDetailSection then table.insert(currentDetailSection.items, label) end
 round(label, 6)
 stroke(label, THEME.stroke, 0.55, 1)
 
@@ -919,17 +942,6 @@ end
 local function showDetails(instance)
 selectedInstance = instance
 
-if instance and not historyNavigating then
-    if historyCursor < #selectionHistory then
-        for i = #selectionHistory, historyCursor + 1, -1 do table.remove(selectionHistory, i) end
-    end
-    if selectionHistory[#selectionHistory] ~= instance then
-        table.insert(selectionHistory, instance)
-        if #selectionHistory > 30 then table.remove(selectionHistory, 1) end
-    end
-    historyCursor = #selectionHistory
-end
-
 clearDetails()
 
 if not instance then
@@ -937,15 +949,57 @@ addDetail("Select an Instance to view its information.", 45)
 return
 end
 
--- Track recent selections without duplicating entries.
-
 local function section(title)
-local label = addDetail("▼ " .. title, 30)
-label.BackgroundColor3 = THEME.surface
-label.TextColor3 = THEME.accent
-label.Font = Enum.Font.GothamBold
-return label
+    local data = {title=title, open=true, items={}}
+    table.insert(detailSections, data)
+    currentDetailSection = data
+    local label = Instance.new("TextButton")
+    label.Size = UDim2.new(1, -10, 0, 30)
+    label.BackgroundColor3 = THEME.surface
+    label.TextColor3 = THEME.accent
+    label.Text = "▼  " .. title
+    label.TextSize = 12
+    label.Font = Enum.Font.GothamBold
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.BorderSizePixel = 0
+    label.AutoButtonColor = false
+    label.ZIndex = 104
+    label.Parent = detailsScroll
+    round(label, 6)
+    stroke(label, THEME.stroke, 0.45, 1)
+    local pad = Instance.new("UIPadding", label)
+    pad.PaddingLeft = UDim.new(0, 8)
+    label.Activated:Connect(function()
+        data.open = not data.open
+        label.Text = (data.open and "▼  " or "▶  ") .. title
+        for _, item in ipairs(data.items) do item.Visible = data.open end
+        task.defer(function() detailsScroll.CanvasSize = UDim2.fromOffset(0, detailsLayout.AbsoluteContentSize.Y + 14) end)
+    end)
+    return label
 end
+
+local propertySearchBox = Instance.new("TextBox")
+propertySearchBox.Name = "PropertySearch"
+propertySearchBox.Size = UDim2.new(1, -10, 0, 30)
+propertySearchBox.BackgroundColor3 = THEME.surface
+propertySearchBox.TextColor3 = THEME.text
+propertySearchBox.PlaceholderColor3 = THEME.muted
+propertySearchBox.PlaceholderText = "Search properties..."
+propertySearchBox.Text = propertySearch
+propertySearchBox.TextSize = 11
+propertySearchBox.Font = Enum.Font.Gotham
+propertySearchBox.ClearTextOnFocus = false
+propertySearchBox.BorderSizePixel = 0
+propertySearchBox.ZIndex = 104
+propertySearchBox.Parent = detailsScroll
+round(propertySearchBox, 5)
+local psPad = Instance.new("UIPadding", propertySearchBox)
+psPad.PaddingLeft = UDim.new(0, 9)
+psPad.PaddingRight = UDim.new(0, 9)
+propertySearchBox:GetPropertyChangedSignal("Text"):Connect(function()
+    propertySearch = propertySearchBox.Text
+    if selectedInstance == instance then showDetails(instance) end
+end)
 
 local function actionButton(text, callback)
 local b = Instance.new("TextButton")
@@ -958,6 +1012,7 @@ b.Font = Enum.Font.GothamMedium
 b.BorderSizePixel = 0
 b.ZIndex = 103
 b.Parent = detailsScroll
+if currentDetailSection then table.insert(currentDetailSection.items, b) end
 round(b, 5)
 stroke(b, THEME.stroke, 0.35, 1)
 b.MouseEnter:Connect(function() b.BackgroundColor3 = THEME.surfaceHover end)
@@ -1004,7 +1059,7 @@ actionButton("Copy Path", function()
  showToast("Path copied to clipboard", "success")
 end)
 actionButton("Jump to Parent", function()
- if parent and parent ~= game then showDetails(parent); setMainStatus("Moved to parent", "success", 1);  else showToast("No parent available", "warning") end
+ if parent and parent ~= game then showDetails(parent);   else showToast("No parent available", "warning") end
 end)
 actionButton("Copy JSON", function()
  local ok, encoded = pcall(function()
@@ -1037,7 +1092,7 @@ table.sort(attributeNames)
 if #attributeNames > 0 then
 for _, name in ipairs(attributeNames) do
  local value = attributes[name]
- addDetail(name .. " = " .. tostring(value) .. "  [" .. typeof(value) .. "]", 42)
+ addDetail(name .. " = " .. formatDisplayValue(value) .. "  [" .. typeof(value) .. "]", 42)
 end
 else
  addDetail("No attributes.", 35)
@@ -1064,16 +1119,16 @@ for groupName, names in pairs(propertyGroups) do
     local found = false
     for _, propertyName in ipairs(names) do
         local ok, value = pcall(function() return instance[propertyName] end)
-        if ok and value ~= nil then
+        if ok and value ~= nil and (propertySearch == "" or string.find(string.lower(propertyName), string.lower(propertySearch), 1, true) or string.find(string.lower(formatDisplayValue(value)), string.lower(propertySearch), 1, true)) then
             if not found then section(groupName); found = true end
-            addDetail(propertyName .. " = " .. tostring(value) .. "  [" .. typeof(value) .. "]", 38)
+            addDetail(propertyName .. " = " .. formatDisplayValue(value) .. "  [" .. typeof(value) .. "]", 38)
         end
     end
 end
 
 section("RELATIONSHIPS")
 addDetail("Parent → " .. (parent and getPath(parent) or "nil"), 42)
-if children > 0 then actionButton("Show Children (" .. tostring(children) .. ")", function() expanded[instance] = true; rebuildTree(); setMainStatus("Showing children of " .. instance.Name, "success", 1);  end) end
+if children > 0 then actionButton("Show Children (" .. tostring(children) .. ")", function() expanded[instance] = true; rebuildTree();   end) end
 local refCount = 0
 for _, propertyName in ipairs({"Adornee", "Attachment0", "Attachment1", "Part0", "Part1", "Target", "SoundId", "CameraSubject", "Parent"}) do
     local ok, value = pcall(function() return instance[propertyName] end)
@@ -1086,228 +1141,138 @@ if refCount == 0 then addDetail("No direct Instance references found.", 35) end
 
 end
 ------------------------------------------------------------
--- COMPARE / NAVIGATION WINDOWS
-------------------------------------------------------------
-local function snapshotInstance(instance)
-    local props = {}
-    local candidates = {
-        "CFrame","Position","Orientation","Size","Color","Material","Transparency",
-        "Reflectance","Anchored","CanCollide","CanTouch","CanQuery","Massless",
-        "CollisionGroup","Enabled","Active","Rate","Lifetime","Looped","Playing",
-        "Volume","PlaybackSpeed","FieldOfView","CameraType","DisplayName","Health",
-        "MaxHealth","WalkSpeed","JumpPower"
-    }
-    for _, name in ipairs(candidates) do
-        local ok, value = pcall(function() return instance[name] end)
-        if ok and value ~= nil then props[name] = tostring(value) .. " [" .. typeof(value) .. "]" end
-    end
-    for name, value in pairs(getAttributes(instance)) do
-        props["Attribute:" .. tostring(name)] = tostring(value) .. " [" .. typeof(value) .. "]"
-    end
-    return props
-end
-
-function showCompare(a, b)
-    local existing = screenGui:FindFirstChild("InspectorCompare")
-    if existing then existing:Destroy() end
-    if not a or not b then
-        showToast("Select two instances to compare", "warning")
-        return
-    end
-
-    local camera = workspace.CurrentCamera
-    local vp = camera and camera.ViewportSize or Vector2.new(800,600)
-    local w = math.max(220, math.min(760, vp.X - 16))
-    local h = math.max(220, math.min(620, vp.Y - 16))
-
-    local f = Instance.new("Frame", screenGui)
-    f.Name = "InspectorCompare"
-    f.Size = UDim2.fromOffset(w,h)
-    f.Position = UDim2.new(.5,0,.5,0)
-    f.AnchorPoint = Vector2.new(.5,.5)
-    f.BackgroundColor3 = THEME.bg
-    f.BorderSizePixel = 0
-    f.ZIndex = 28000
-    round(f,10); stroke(f,THEME.stroke,.05,1); gradient(f,90)
-
-    local hLabel = Instance.new("TextLabel",f)
-    hLabel.Size=UDim2.new(1,-64,0,34); hLabel.Position=UDim2.fromOffset(14,7)
-    hLabel.BackgroundTransparency=1; hLabel.Text="COMPARE INSTANCES"; hLabel.TextColor3=THEME.text
-    hLabel.TextSize=16; hLabel.Font=Enum.Font.GothamBold; hLabel.TextXAlignment=Enum.TextXAlignment.Left
-    hLabel.ZIndex=28001
-
-    local c=Instance.new("TextButton",f)
-    c.Size=UDim2.fromOffset(30,28); c.Position=UDim2.new(1,-40,0,8); c.Text="X"
-    c.TextColor3=THEME.text; c.BackgroundColor3=THEME.surface; c.BorderSizePixel=0
-    c.ZIndex=28001; c.Font=Enum.Font.GothamBold; c.TextSize=12; round(c,5)
-    c.Activated:Connect(function() f:Destroy() end)
-
-    local cardY=48
-    local cardH=56
-    local cardW=math.max(110, math.floor((w-45)/2))
-    local left=Instance.new("TextLabel",f)
-    left.Size=UDim2.fromOffset(cardW,cardH); left.Position=UDim2.fromOffset(15,cardY)
-    left.BackgroundColor3=THEME.panel2; left.Text=a.Name.."\n"..a.ClassName.."\n"..getPath(a)
-    left.TextColor3=THEME.text; left.TextSize=11; left.Font=Enum.Font.Gotham; left.TextXAlignment=Enum.TextXAlignment.Left
-    left.TextYAlignment=Enum.TextYAlignment.Center; left.TextWrapped=true; left.ZIndex=28001; round(left,6)
-    local lp=Instance.new("UIPadding",left); lp.PaddingLeft=UDim.new(0,8); lp.PaddingRight=UDim.new(0,8)
-    local right=left:Clone(); right.Parent=f; right.Position=UDim2.new(1,-15-cardW,0,cardY); right.Text=b.Name.."\n"..b.ClassName.."\n"..getPath(b)
-
-    local scroll=Instance.new("ScrollingFrame",f)
-    scroll.Name="CompareScroll"; scroll.Size=UDim2.new(1,-30,1,-(cardY+cardH+12)); scroll.Position=UDim2.fromOffset(15,cardY+cardH+8)
-    scroll.BackgroundTransparency=1; scroll.BorderSizePixel=0; scroll.ScrollBarThickness=5
-    scroll.ScrollBarImageTransparency=.15; scroll.AutomaticCanvasSize=Enum.AutomaticSize.None
-    scroll.CanvasSize=UDim2.new(0,0,0,0); scroll.ZIndex=28001
-    local layout=Instance.new("UIListLayout",scroll); layout.Padding=UDim.new(0,4); layout.SortOrder=Enum.SortOrder.LayoutOrder
-    local bottomPad=Instance.new("UIPadding",scroll); bottomPad.PaddingBottom=UDim.new(0,10)
-    layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-        scroll.CanvasSize=UDim2.new(0,0,0,layout.AbsoluteContentSize.Y+10)
-    end)
-
-    local pa=snapshotInstance(a); local pb=snapshotInstance(b); local keys={}
-    for k in pairs(pa) do keys[k]=true end; for k in pairs(pb) do keys[k]=true end
-    local list={}; for k in pairs(keys) do table.insert(list,k) end; table.sort(list)
-    for _,k in ipairs(list) do
-        local av=pa[k] or "<missing>"; local bv=pb[k] or "<missing>"; local different=av~=bv
-        local row=Instance.new("TextLabel",scroll)
-        row.Size=UDim2.new(1,-6,0,math.max(34, different and 44 or 36))
-        row.BackgroundColor3=different and THEME.accentSoft or THEME.panel2; row.BorderSizePixel=0
-        row.Text=k.."\n  A: "..av.."    |    B: "..bv; row.TextColor3=THEME.text; row.TextSize=10
-        row.Font=Enum.Font.Code; row.TextXAlignment=Enum.TextXAlignment.Left; row.TextYAlignment=Enum.TextYAlignment.Center
-        row.TextWrapped=true; row.ZIndex=28002; round(row,5)
-        local pad=Instance.new("UIPadding",row); pad.PaddingLeft=UDim.new(0,8); pad.PaddingRight=UDim.new(0,8)
-    end
-    task.defer(function() scroll.CanvasPosition=Vector2.new(0,0) end)
-    setMainStatus("Comparing "..a.Name.." with "..b.Name, "success", 1)
-end
-
-
-------------------------------------------------------------
 -- TREE
 ------------------------------------------------------------
 
 local function clearTree()
-for _, child in ipairs(treeScroll:GetChildren()) do
-if not child:IsA("UIListLayout") then
-child:Destroy()
-end
-end
+    for _, child in ipairs(treeScroll:GetChildren()) do
+        if not child:IsA("UIListLayout") then child:Destroy() end
+    end
 end
 
-------------------------------------------------------------
+local function createNode(instance, depth, childIndex, duplicateName)
+    if treeNodeCount >= MAX_VISIBLE_TREE_NODES then return end
+    if currentSearch ~= "" and not instanceMatches(instance) and not hasMatchingDescendant(instance) then return end
+    treeNodeCount += 1
+    local children = {}
+    pcall(function() children = instance:GetChildren() end)
+    local hasChildren = #children > 0
+    local isExpanded = expanded[instance] == true
 
-local visibleTreeNodes = 0
-local function createNode(instance, depth)
-    visibleTreeNodes += 1
-    if visibleTreeNodes > MAX_VISIBLE_TREE_NODES then return end
-    if currentSearch ~= "" then
-        refreshSearchCache()
-        if not searchCache[instance] and not hasMatchingDescendant(instance) then return end
+    local row = Instance.new("Frame")
+    row.Name = "NodeRow"
+    row.Size = UDim2.new(1, -5, 0, 30)
+    row.BackgroundColor3 = selectedInstance == instance and THEME.accentSoft or THEME.panel2
+    row.BorderSizePixel = 0
+    row.ZIndex = 103
+    row.Parent = treeScroll
+    treeRows[instance] = row
+    round(row, 5)
+
+    local indent = math.min(depth, 22) * 14
+    local arrow = Instance.new("TextButton")
+    arrow.Size = UDim2.fromOffset(26, 30)
+    arrow.Position = UDim2.fromOffset(indent, 0)
+    arrow.BackgroundTransparency = 1
+    arrow.BorderSizePixel = 0
+    arrow.Text = hasChildren and (isExpanded and "▼" or "▶") or ""
+    arrow.TextColor3 = THEME.text
+    arrow.TextSize = 11
+    arrow.Font = Enum.Font.GothamBold
+    arrow.AutoButtonColor = false
+    arrow.ZIndex = 106
+    arrow.Parent = row
+    if hasChildren then
+        arrow.Activated:Connect(function() expanded[instance] = not expanded[instance]; rebuildTree() end)
     end
 
-local children = {}
+    local icon = Instance.new("TextLabel")
+    icon.Size = UDim2.fromOffset(22, 30)
+    icon.Position = UDim2.fromOffset(indent + 25, 0)
+    icon.BackgroundTransparency = 1
+    icon.Text = getClassIcon(instance)
+    icon.TextColor3 = THEME.accent
+    icon.TextSize = 12
+    icon.Font = Enum.Font.GothamBold
+    icon.ZIndex = 105
+    icon.Parent = row
 
-pcall(function()
-children = instance:GetChildren()
-end)
+    local nameButton = Instance.new("TextButton")
+    nameButton.Size = UDim2.new(1, -(indent + 50), 1, 0)
+    nameButton.Position = UDim2.fromOffset(indent + 47, 0)
+    nameButton.BackgroundTransparency = 1
+    nameButton.BorderSizePixel = 0
+    nameButton.TextColor3 = THEME.text
+    nameButton.TextSize = 11
+    nameButton.Font = Enum.Font.Gotham
+    nameButton.TextXAlignment = Enum.TextXAlignment.Left
+    nameButton.TextTruncate = Enum.TextTruncate.AtEnd
+    nameButton.AutoButtonColor = false
+    nameButton.ZIndex = 105
+    local childText = hasChildren and ("  • " .. tostring(#children)) or ""
+    local duplicateText = duplicateName and ("  [#" .. tostring(childIndex or 1) .. "]") or ""
+    local attrs = getAttributeCount(instance)
+    local attrText = attrs > 0 and ("  · " .. tostring(attrs) .. "a") or ""
+    nameButton.Text = instance.Name .. duplicateText .. "  <" .. instance.ClassName .. ">" .. childText .. attrText
+    nameButton.Parent = row
+    nameButton.Activated:Connect(function() showDetails(instance); rebuildTree() end)
 
-local hasChildren = #children > 0
-local isExpanded = expanded[instance] == true
-
-local button = Instance.new("TextButton")
-
-button.Name = "Node"
-button.Size = UDim2.new(1, -5, 0, 30)
-
-button.BackgroundColor3 =
-selectedInstance == instance
-and THEME.accentSoft
-or THEME.panel2
-
-button.BorderSizePixel = 0
-button.TextColor3 = THEME.text
-
-button.TextSize = 12
-button.Font = Enum.Font.Gotham
-
-button.TextXAlignment = Enum.TextXAlignment.Left
-button.AutoButtonColor = true
-
-button.ZIndex = 13
-button.Parent = treeScroll
-
-local nodeBase = button.BackgroundColor3
-button.MouseEnter:Connect(function()
-    if selectedInstance ~= instance then
-        button.BackgroundColor3 = THEME.surfaceHover
+    if isExpanded then
+        local nameCounts = {}
+        for _, child in ipairs(children) do nameCounts[child.Name] = (nameCounts[child.Name] or 0) + 1 end
+        for i, child in ipairs(children) do
+            createNode(child, depth + 1, i, nameCounts[child.Name] > 1)
+        end
     end
-end)
-button.MouseLeave:Connect(function()
-    if selectedInstance ~= instance then
-        button.BackgroundColor3 = nodeBase
-    end
-end)
-
-local arrow = ""
-
-if hasChildren then
-arrow = isExpanded and "▼ " or "▶ "
-else
-arrow = "   "
 end
-
-local attributeNumber = getAttributeCount(instance)
-
-local attributeText = ""
-
-if attributeNumber > 0 then
-attributeText = "  [" .. tostring(attributeNumber) .. " attr]"
-end
-
-button.Text =
-string.rep("    ", depth)
-.. arrow
-.. instance.Name
-.. "  <"
-.. instance.ClassName
-.. ">"
-.. attributeText
-
-button.MouseButton1Click:Connect(function()
-showDetails(instance)
-
-if hasChildren then
-expanded[instance] = not expanded[instance]
-rebuildTree()
-else
-rebuildTree()
-end
-end)
-
-if isExpanded then
-for _, child in ipairs(children) do
-createNode(child, depth + 1)
-end
-end
-end
-
-------------------------------------------------------------
 
 function rebuildTree()
-    if treeRebuildQueued then return end
-    treeRebuildQueued = true
+    local oldY = treeScroll.CanvasPosition.Y
+    clearTree()
+    treeNodeCount = 0
+    treeRows = {}
+    refreshSearchCache()
+    if expanded[game] == nil then expanded[game] = true end
+    createNode(game, 0)
     task.defer(function()
-        treeRebuildQueued = false
-        visibleTreeNodes = 0
-        refreshSearchCache()
-        clearTree()
-        createNode(game, 0)
-        if visibleTreeNodes > MAX_VISIBLE_TREE_NODES then
-            setMainStatus("Tree display limited to " .. tostring(MAX_VISIBLE_TREE_NODES) .. " visible nodes for performance", "warning", 1)
-            showToast("Tree display limited for performance", "warning", 2.5)
+        local maxY = math.max(0, treeLayout.AbsoluteContentSize.Y - treeScroll.AbsoluteWindowSize.Y)
+        treeScroll.CanvasSize = UDim2.fromOffset(0, treeLayout.AbsoluteContentSize.Y + 16)
+        treeScroll.CanvasPosition = Vector2.new(0, math.clamp(oldY, 0, maxY))
+        if treeNodeCount >= MAX_VISIBLE_TREE_NODES then
+            setMainStatus("Display limited to " .. tostring(MAX_VISIBLE_TREE_NODES) .. " visible nodes", "warning")
         end
-        treeScroll.CanvasPosition = treeScroll.CanvasPosition
     end)
+end
+
+------------------------------------------------------------
+-- SEARCH RESULT NAVIGATION
+------------------------------------------------------------
+
+local function selectSearchMatch(direction)
+    refreshSearchCache()
+    local matches = {}
+    for inst, matched in pairs(searchCache) do if matched then table.insert(matches, inst) end end
+    table.sort(matches, function(a,b) return getPath(a) < getPath(b) end)
+    if #matches == 0 then return end
+    local index = 1
+    for i, inst in ipairs(matches) do if inst == selectedInstance then index = i; break end end
+    index = ((index - 1 + direction) % #matches) + 1
+    local target = matches[index]
+    local parent = target.Parent
+    while parent and parent ~= game do expanded[parent] = true; parent = parent.Parent end
+    expanded[game] = true
+    selectedInstance = target
+    rebuildTree()
+    task.defer(function()
+        local row = treeRows[target]
+        if row and row.Parent then
+            local y = row.AbsolutePosition.Y - treeScroll.AbsolutePosition.Y + treeScroll.CanvasPosition.Y - 12
+            local maxY = math.max(0, treeLayout.AbsoluteContentSize.Y - treeScroll.AbsoluteWindowSize.Y)
+            treeScroll.CanvasPosition = Vector2.new(0, math.clamp(y, 0, maxY))
+        end
+    end)
+    showDetails(target)
+    setMainStatus("Match " .. tostring(index) .. " / " .. tostring(#matches), "ready")
 end
 
 ------------------------------------------------------------
@@ -1315,104 +1280,48 @@ end
 ------------------------------------------------------------
 
 local function scanInstance(instance, generation)
-if scanGeneration ~= generation then
-return
+    if scanGeneration ~= generation or instanceCount >= MAX_INSTANCES or scanned[instance] then return end
+    scanned[instance] = true
+    instanceCount += 1
+    local attrs = getAttributes(instance)
+    for _ in pairs(attrs) do attributeCount += 1 end
+    if instanceCount % YIELD_EVERY == 0 then
+        setMainStatus("Scanning... " .. tostring(instanceCount) .. " instances", "working")
+        task.wait()
+    end
+    local children = {}
+    if not pcall(function() children = instance:GetChildren() end) then return end
+    for _, child in ipairs(children) do
+        if scanGeneration ~= generation or instanceCount >= MAX_INSTANCES then return end
+        scanInstance(child, generation)
+    end
 end
-
-if instanceCount >= MAX_INSTANCES then
-return
-end
-
-if scanned[instance] then
-return
-end
-
-scanned[instance] = true
-instanceCount += 1
-
-local attrs = getAttributes(instance)
-
-for _ in pairs(attrs) do
-attributeCount += 1
-end
-
-if instanceCount % YIELD_EVERY == 0 then
-setMainStatus("Scanning... " .. tostring(instanceCount) .. " instances", "working", math.min(instanceCount / math.max(MAX_INSTANCES, 1), 0.98))
-refreshStatusCounts()
-
-task.wait()
-end
-
-local children = {}
-
-local success = pcall(function()
-children = instance:GetChildren()
-end)
-
-if not success then
-return
-end
-
-for _, child in ipairs(children) do
-if scanGeneration ~= generation then
-return
-end
-
-if instanceCount >= MAX_INSTANCES then
-return
-end
-
-scanInstance(child, generation)
-end
-end
-
-------------------------------------------------------------
 
 local function performScan()
-if scanInProgress then
-return
-end
-
-scanInProgress = true
-scanGeneration += 1
-
-local generation = scanGeneration
-
-scanned = {}
-instanceCount = 0
-attributeCount = 0
-selectedInstance = nil
-searchCache = {}
-searchCacheQuery = nil
-selectionHistory = {}
-historyCursor = 0
-
-setMainStatus("Scanning...", "working", 0)
-refreshStatusCounts()
-
-task.spawn(function()
-scanInstance(game, generation)
-
-if scanGeneration ~= generation then
-return
-end
-
-scanInProgress = false
-
-setMainStatus("Scan complete — " .. tostring(instanceCount) .. " instances | " .. tostring(attributeCount) .. " attributes", "success", 1)
-refreshStatusCounts()
-showToast("Scan complete — " .. tostring(instanceCount) .. " instances", "success", 2.5)
-
-rebuildTree()
-showDetails(nil)
-end)
+    if scanInProgress then return end
+    scanInProgress = true
+    scanGeneration += 1
+    local generation = scanGeneration
+    scanned = {}
+    instanceCount = 0
+    attributeCount = 0
+    selectedInstance = nil
+    expanded = {[game] = true}
+    searchCache = {}
+    searchCacheQuery = nil
+    setMainStatus("Scanning...", "working")
+    task.spawn(function()
+        scanInstance(game, generation)
+        if scanGeneration ~= generation then return end
+        scanInProgress = false
+        local limited = instanceCount >= MAX_INSTANCES
+        setMainStatus(limited and ("Scan complete — limit " .. tostring(MAX_INSTANCES) .. " reached") or ("Scan complete — " .. tostring(instanceCount) .. " instances"), limited and "warning" or "success", 1)
+        rebuildTree()
+        showDetails(nil)
+    end)
 end
 
 ------------------------------------------------------------
--- JSON
-------------------------------------------------------------
-
---========================================================
 -- JSON EXPORT + DISCORD WEBHOOK
 --========================================================
 
@@ -2599,7 +2508,7 @@ local function showJSON()
     -- Capture the current selection when the export starts.
     local exportSelection = selectedInstance
     local exportingSelected = exportSelection ~= nil and scanned[exportSelection] == true
-    setMainStatus(exportingSelected and "JSON panel opened — selected instance" or "JSON panel opened — all scanned instances", "ready")
+    
 
     --====================================================
     -- WINDOW
@@ -2676,7 +2585,7 @@ local function showJSON()
     title.TextXAlignment =
         Enum.TextXAlignment.Left
 
-    title.ZIndex = 101
+    title.ZIndex = 20001
     title.Parent = jsonGui
 
     --====================================================
@@ -2705,7 +2614,7 @@ local function showJSON()
     closeButton.Font =
         Enum.Font.SourceSansBold
 
-    closeButton.ZIndex = 102
+    closeButton.ZIndex = 20002
     closeButton.Parent = jsonGui
 
     closeButton.MouseButton1Click:Connect(function()
@@ -2718,7 +2627,7 @@ local function showJSON()
         end
 
         jsonGui:Destroy()
-        setMainStatus("JSON panel closed", "ready")
+        
 
     end)
 
@@ -2732,7 +2641,7 @@ local function showJSON()
     optionsFrame.Position = UDim2.new(0, 15, 0, 48)
     optionsFrame.BackgroundColor3 = Color3.fromRGB(32, 32, 32)
     optionsFrame.BorderSizePixel = 0
-    optionsFrame.ZIndex = 101
+    optionsFrame.ZIndex = 20001
     optionsFrame.Parent = jsonGui
 
     local optionsCorner = Instance.new("UICorner")
@@ -2752,7 +2661,7 @@ local function showJSON()
     searchInput.TextSize = 13
     searchInput.Font = Enum.Font.SourceSans
     searchInput.ClearTextOnFocus = false
-    searchInput.ZIndex = 102
+    searchInput.ZIndex = 20002
     searchInput.Parent = optionsFrame
 
     local checks = {}
@@ -2766,7 +2675,7 @@ local function showJSON()
         b.TextColor3 = Color3.new(1,1,1)
         b.TextSize = 13
         b.Font = Enum.Font.SourceSans
-        b.ZIndex = 102
+        b.ZIndex = 20002
         b.Parent = optionsFrame
         local state = default
         local function refresh() b.Text = (state and "☑ " or "☐ ") .. text end
@@ -2814,7 +2723,7 @@ local function showJSON()
     statusLabel.TextXAlignment =
         Enum.TextXAlignment.Left
 
-    statusLabel.ZIndex = 101
+    statusLabel.ZIndex = 20001
     statusLabel.Parent = jsonGui
 
     --====================================================
@@ -2844,7 +2753,7 @@ local function showJSON()
     recordLabel.TextXAlignment =
         Enum.TextXAlignment.Left
 
-    recordLabel.ZIndex = 101
+    recordLabel.ZIndex = 20001
     recordLabel.Parent = jsonGui
 
     --====================================================
@@ -2874,7 +2783,7 @@ local function showJSON()
     sizeLabel.TextXAlignment =
         Enum.TextXAlignment.Right
 
-    sizeLabel.ZIndex = 101
+    sizeLabel.ZIndex = 20001
     sizeLabel.Parent = jsonGui
 
     local validationLabel = Instance.new("TextLabel")
@@ -2886,7 +2795,7 @@ local function showJSON()
     validationLabel.TextSize = 11
     validationLabel.Font = Enum.Font.GothamMedium
     validationLabel.TextXAlignment = Enum.TextXAlignment.Left
-    validationLabel.ZIndex = 101
+    validationLabel.ZIndex = 20001
     validationLabel.Parent = jsonGui
     local validationPassed = false
 
@@ -2933,7 +2842,7 @@ local function showJSON()
     previewBox.Text =
         "Generating JSON..."
 
-    previewBox.ZIndex = 101
+    previewBox.ZIndex = 20001
     previewBox.Parent = jsonGui
 
     --====================================================
@@ -2948,7 +2857,7 @@ local function showJSON()
     exportButton.TextColor3 = Color3.new(1,1,1)
     exportButton.TextSize = 14
     exportButton.Font = Enum.Font.SourceSansBold
-    exportButton.ZIndex = 102
+    exportButton.ZIndex = 20002
     exportButton.Parent = jsonGui
 
     local function startExport()
@@ -3011,7 +2920,7 @@ local function showJSON()
             local readyText = (exportingSelected and "Selected export ready — " or "Export ready — ") .. tostring(info.total or 0) .. " instances | " .. tostring(info.attributes or 0) .. " attrs | " .. tostring(info.properties or 0) .. " props | " .. tostring(info.tags or 0) .. " tags"
             statusLabel.Text = readyText
             setMainStatus(readyText, "success", 1)
-            showToast("JSON export complete — " .. tostring(info.total or 0) .. " instances", "success", 3)
+            
             lastExportInfo = info
         end)
     end
@@ -3044,7 +2953,7 @@ local function showJSON()
     copyButton.Font =
         Enum.Font.SourceSansBold
 
-    copyButton.ZIndex = 102
+    copyButton.ZIndex = 20002
     copyButton.Parent = jsonGui
 
     copyButton.MouseButton1Click:Connect(function()
@@ -3116,7 +3025,7 @@ local function showJSON()
     discordButton.Font =
         Enum.Font.SourceSansBold
 
-    discordButton.ZIndex = 102
+    discordButton.ZIndex = 20002
     discordButton.Parent = jsonGui
 
     discordButton.MouseButton1Click:Connect(function()
@@ -3236,7 +3145,7 @@ local function showJSON()
     cancelButton.Font =
         Enum.Font.SourceSansBold
 
-    cancelButton.ZIndex = 102
+    cancelButton.ZIndex = 20002
     cancelButton.Parent = jsonGui
 
     cancelButton.MouseButton1Click:Connect(function()
@@ -3615,6 +3524,7 @@ end)
 
 rescanButton.MouseButton1Click:Connect(function()
 expanded = {}
+expanded[game] = true
 setMainStatus("Starting rescan...", "working", 0)
 
 performScan()
@@ -3623,60 +3533,23 @@ end)
 ------------------------------------------------------------
 
 expandButton.MouseButton1Click:Connect(function()
-setMainStatus("Expanding hierarchy...", "working")
 expandAll()
-setMainStatus("Hierarchy expanded", "success", 1)
 
 end)
 
 ------------------------------------------------------------
 
 collapseButton.MouseButton1Click:Connect(function()
-setMainStatus("Collapsing hierarchy...", "working")
 collapseAll()
-setMainStatus("Hierarchy collapsed", "success", 1)
 
 end)
 
 ------------------------------------------------------------
 
-backButton.MouseButton1Click:Connect(function()
-    if historyCursor > 1 then
-        historyCursor -= 1
-        local target = selectionHistory[historyCursor]
-    end
-end)
-
-forwardButton.MouseButton1Click:Connect(function()
-    if historyCursor < #selectionHistory then
-        historyCursor += 1
-        local target = selectionHistory[historyCursor]
-    end
-end)
-
 jsonButton.MouseButton1Click:Connect(function()
 showJSON()
 end)
 
-compareButton.MouseButton1Click:Connect(function()
-    if not selectedInstance then showToast("Select an instance first", "warning"); return end
-    if not compareInstance then
-        compareInstance = selectedInstance
-        compareButton.Text = "Compare ✓"
-        setMainStatus("Comparison source set: " .. selectedInstance.Name, "success", 1)
-    elseif compareInstance == selectedInstance then
-        compareInstance = nil
-        compareButton.Text = "Compare"
-    else
-        showCompare(compareInstance, selectedInstance)
-    end
-end)
-
-
-statsButton.MouseButton1Click:Connect(function()
-showStats()
-
-end)
 
 filterButton.MouseButton1Click:Connect(function()
 showClassFilter()
@@ -3701,6 +3574,12 @@ else
 end
 end)
 
+searchBox.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == Enum.KeyCode.Return then
+        selectSearchMatch(UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) and -1 or 1)
+    end
+end)
+
 ------------------------------------------------------------
 -- MOBILE LAYOUT
 ------------------------------------------------------------
@@ -3719,17 +3598,20 @@ local function updateMobileLayout()
 
     titleBar.Size = UDim2.new(1,0,0, phone and 48 or 50)
     titleLabel.Position = UDim2.fromOffset(14,6)
-    titleLabel.Size = UDim2.new(compact and 0.42 or 0.45,0,0,22)
+    titleLabel.Size = UDim2.new(compact and 0.40 or 0.44,0,0,22)
     titleLabel.TextSize = phone and 14 or 17
     subtitleLabel.Position = UDim2.fromOffset(14,27)
     subtitleLabel.TextSize = phone and 8 or 9
-    liveBadge.Visible = not phone
     closeButton.Size = UDim2.fromOffset(phone and 30 or 34,30)
     closeButton.Position = UDim2.new(1, -(phone and 36 or 39), 0, 8)
 
-    searchBox.Size = UDim2.new(phone and 0.42 or (compact and 0.34 or 0.30),0,0, phone and 30 or 34)
-    searchBox.Position = UDim2.new(phone and 0.50 or (compact and 0.53 or 0.54),0,0, phone and 9 or 8)
+    -- Give the primary search field most of the remaining title-bar width so
+    -- long queries/placeholders stay inside the field instead of colliding with
+    -- the title or close button.
+    searchBox.Size = UDim2.new(0.50, phone and -42 or (compact and -46 or -52), 0, phone and 30 or 34)
+    searchBox.Position = UDim2.new(0.48, 0, 0, phone and 9 or 8)
     searchBox.TextSize = phone and 10 or 12
+    searchBox.TextTruncate = Enum.TextTruncate.AtEnd
 
     -- Keep the action toolbar to ONE row at every viewport size.
     -- On smaller screens buttons become compact/abbreviated instead of wrapping,
@@ -3739,10 +3621,10 @@ local function updateMobileLayout()
     toolbar.Size = UDim2.new(1,-20,0,toolbarHeight)
     toolbar.Position = UDim2.fromOffset(10,top)
 
-    local buttons={rescanButton,expandButton,collapseButton,jsonButton,statsButton,filterButton,backButton,forwardButton,compareButton}
-    local desktopLabels={"Rescan","Expand All","Collapse All","JSON","Stats","Class","‹","›","Compare"}
-    local compactLabels={"Scan","Expand","Collapse","JSON","Stats","Class","‹","›","Compare"}
-    local phoneLabels={"Scan","Exp","Col","JSON","Stats","Class","‹","›","Cmp"}
+    local buttons={rescanButton,expandButton,collapseButton,jsonButton,statsButton,filterButton}
+    local desktopLabels={"Rescan","Expand All","Collapse All","JSON","Stats","Class"}
+    local compactLabels={"Scan","Expand","Collapse","JSON","Stats","Class"}
+    local phoneLabels={"Scan","Exp","Col","JSON","Stats","Class"}
     local gap = phone and 2 or (compact and 4 or 6)
     local availableWidth = math.max(300, mainFrame.AbsoluteSize.X - 20)
     local minButton = phone and 26 or (compact and 48 or 34)
