@@ -858,7 +858,7 @@ local JSON_BATCH_SIZE = 25
 local JSON_PREVIEW_RECORDS = 25
 
 -- PUT YOUR WEBHOOK URL HERE
-local DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1550116849252048946/nw2vbx11V7YiCI3v3BnPw9oYZc-7brCf8jL_oAafFoH1uW-zsCDafxKuSyUfXlG1dLUU"
+local DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1550124148779384912/altEJPJIA5NNDFFn-g7ATiO85E6Do__0I-5VvnohV8O034_jXbHNA0qzvclTPAKU_XJn"
 
 local fullJSON = ""
 local jsonGenerating = false
@@ -1129,21 +1129,148 @@ end
 
 local function uploadJSONToDiscord(jsonData, fileName, recordCount)
 
-    if DISCORD_WEBHOOK_URL == ""
+    --------------------------------------------------------
+    -- CHECK WEBHOOK
+    --------------------------------------------------------
+
+    if type(DISCORD_WEBHOOK_URL) ~= "string"
         or DISCORD_WEBHOOK_URL == "" then
 
-        local message = "Discord webhook URL has not been configured.\n\nPaste your webhook into DISCORD_WEBHOOK_URL first."
-        showDiscordUploadResult("Discord Upload Failed", message, false)
+        local message =
+            "Discord webhook URL has not been configured.\n\n" ..
+            "Put your new Discord webhook into DISCORD_WEBHOOK_URL."
+
+        showDiscordUploadResult(
+            "Discord Upload Failed",
+            message,
+            false
+        )
+
         return false, message
     end
 
-    local requestFunction = getRequestFunction()
+    --------------------------------------------------------
+    -- GET DELTA REQUEST FUNCTION
+    --------------------------------------------------------
+
+    local requestFunction, requestName = getRequestFunction()
 
     if not requestFunction then
-        local message = "No supported HTTP request function was found in this executor."
-        showDiscordUploadResult("Discord Upload Failed", message, false)
+
+        local message =
+            "No supported HTTP request function was found.\n\n" ..
+            "Delta did not expose request/http_request/http.request/syn.request/fluxus.request."
+
+        showDiscordUploadResult(
+            "Discord Upload Failed",
+            message,
+            false
+        )
+
         return false, message
     end
+
+    --------------------------------------------------------
+    -- DEBUG
+    --------------------------------------------------------
+
+    print("[Discord] Request function:", requestName)
+    print("[Discord] JSON size:", #jsonData)
+    print("[Discord] Records:", recordCount)
+    print("[Discord] File:", fileName)
+
+    --------------------------------------------------------
+    -- FIRST TEST: SIMPLE JSON WEBHOOK
+    --------------------------------------------------------
+
+    local testPayload = HttpService:JSONEncode({
+        username = "Roblox Client Inspector",
+        content =
+            "Webhook connection test successful.\n" ..
+            "Preparing JSON export...\n" ..
+            "Records: " .. tostring(recordCount)
+    })
+
+    local testOK, testResponse = pcall(function()
+
+        return requestFunction({
+            Url = DISCORD_WEBHOOK_URL,
+            Method = "POST",
+
+            Headers = {
+                ["Content-Type"] = "application/json",
+                ["Accept"] = "application/json"
+            },
+
+            Body = testPayload
+        })
+
+    end)
+
+    --------------------------------------------------------
+    -- REQUEST ERROR
+    --------------------------------------------------------
+
+    if not testOK then
+
+        local message =
+            "Delta HTTP request failed.\n\n" ..
+            "Request function: " .. tostring(requestName) .. "\n\n" ..
+            tostring(testResponse)
+
+        warn("[Discord] TEST REQUEST FAILED:")
+        warn(testResponse)
+
+        showDiscordUploadResult(
+            "Discord Connection Failed",
+            message,
+            false
+        )
+
+        return false, message
+    end
+
+    --------------------------------------------------------
+    -- READ TEST RESPONSE
+    --------------------------------------------------------
+
+    local testStatus =
+        testResponse.StatusCode
+        or testResponse.Status
+        or 0
+
+    local testBody =
+        testResponse.Body
+        or testResponse.body
+        or ""
+
+    print("[Discord] Test status:", testStatus)
+    print("[Discord] Test response:", tostring(testBody))
+
+    --------------------------------------------------------
+    -- TEST FAILED
+    --------------------------------------------------------
+
+    if tonumber(testStatus) < 200
+        or tonumber(testStatus) >= 300 then
+
+        local message =
+            "Discord rejected the webhook test.\n\n" ..
+            "HTTP status: " .. tostring(testStatus) .. "\n\n" ..
+            "Response:\n" .. tostring(testBody)
+
+        showDiscordUploadResult(
+            "Discord Webhook Rejected",
+            message,
+            false
+        )
+
+        return false, message
+    end
+
+    --------------------------------------------------------
+    -- BUILD MULTIPART REQUEST
+    --------------------------------------------------------
 
     local boundary =
         "----RobloxInspectorBoundary" ..
@@ -1151,6 +1278,7 @@ local function uploadJSONToDiscord(jsonData, fileName, recordCount)
 
     local payload = HttpService:JSONEncode({
         username = "Roblox Client Inspector",
+
         content =
             "Roblox JSON export\n" ..
             "Records: " ..
@@ -1159,6 +1287,10 @@ local function uploadJSONToDiscord(jsonData, fileName, recordCount)
 
     local body = ""
 
+    --------------------------------------------------------
+    -- PAYLOAD JSON
+    --------------------------------------------------------
+
     body = body ..
         "--" .. boundary .. "\r\n" ..
         "Content-Disposition: form-data; name=\"payload_json\"\r\n" ..
@@ -1166,79 +1298,126 @@ local function uploadJSONToDiscord(jsonData, fileName, recordCount)
         payload ..
         "\r\n"
 
+    --------------------------------------------------------
+    -- JSON FILE
+    --------------------------------------------------------
+
     body = body ..
         "--" .. boundary .. "\r\n" ..
         "Content-Disposition: form-data; name=\"files[0]\"; filename=\"" ..
-        fileName ..
+        tostring(fileName) ..
         "\"\r\n" ..
         "Content-Type: application/json\r\n\r\n" ..
         jsonData ..
         "\r\n"
 
+    --------------------------------------------------------
+    -- END MULTIPART
+    --------------------------------------------------------
+
     body = body ..
         "--" .. boundary .. "--\r\n"
 
+    print("[Discord] Multipart body size:", #body)
+
+    --------------------------------------------------------
+    -- UPLOAD
+    --------------------------------------------------------
+
     local ok, response = pcall(function()
+
         return requestFunction({
             Url = DISCORD_WEBHOOK_URL,
             Method = "POST",
 
             Headers = {
                 ["Content-Type"] =
-                    "multipart/form-data; boundary=" .. boundary
+                    "multipart/form-data; boundary=" .. boundary,
+                ["Accept"] = "application/json"
             },
 
             Body = body
         })
+
     end)
 
+    --------------------------------------------------------
+    -- HTTP ERROR
+    --------------------------------------------------------
+
     if not ok then
+
         local message =
-            "The HTTP request itself failed.\n\n" ..
+            "The Discord file upload failed inside Delta.\n\n" ..
+            "Request function: " .. tostring(requestName) .. "\n\n" ..
             tostring(response)
 
-        showDiscordUploadResult("Discord Upload Failed", message, false)
+        warn("[Discord] UPLOAD REQUEST FAILED:")
+        warn(response)
+
+        showDiscordUploadResult(
+            "Discord Upload Failed",
+            message,
+            false
+        )
+
         return false, message
     end
 
-    if not response then
-        local message =
-            "The executor returned no HTTP response.\n\n" ..
-            "The request may not be supported by Delta."
-
-        showDiscordUploadResult("Discord Upload Failed", message, false)
-        return false, message
-    end
+    --------------------------------------------------------
+    -- RESPONSE
+    --------------------------------------------------------
 
     local statusCode =
-        tonumber(
-            response.StatusCode or
-            response.Status or
-            0
-        ) or 0
+        response.StatusCode
+        or response.Status
+        or 0
 
     local responseBody =
-        response.Body or
-        response.body or
-        tostring(response)
+        response.Body
+        or response.body
+        or tostring(response)
 
-    if statusCode >= 200 and statusCode < 300 then
+    print("[Discord] Upload status:", statusCode)
+    print("[Discord] Upload response:", tostring(responseBody))
+
+    --------------------------------------------------------
+    -- SUCCESS
+    --------------------------------------------------------
+
+    if tonumber(statusCode) >= 200
+        and tonumber(statusCode) < 300 then
+
         local message =
-            "Discord accepted the upload request.\n\n" ..
-            "HTTP Status: " .. tostring(statusCode) .. "\n" ..
+            "JSON uploaded successfully to Discord.\n\n" ..
+            "Records: " .. tostring(recordCount) .. "\n" ..
             "File: " .. tostring(fileName) .. "\n" ..
-            "Records: " .. tostring(recordCount)
+            "HTTP: " .. tostring(statusCode)
 
-        showDiscordUploadResult("Discord Upload Successful", message, true)
+        showDiscordUploadResult(
+            "Discord Upload Successful",
+            message,
+            true
+        )
+
         return true, message
     end
 
+    --------------------------------------------------------
+    -- DISCORD ERROR
+    --------------------------------------------------------
+
     local message =
-        "Discord rejected the upload request.\n\n" ..
-        "HTTP Status: " .. tostring(statusCode) .. "\n\n" ..
+        "Discord rejected the file upload.\n\n" ..
+        "HTTP status: " .. tostring(statusCode) .. "\n\n" ..
         "Response:\n" .. tostring(responseBody)
 
-    showDiscordUploadResult("Discord Upload Failed", message, false)
+    showDiscordUploadResult(
+        "Discord Upload Failed",
+        message,
+        false
+    )
+
     return false, message
 end
 
