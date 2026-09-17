@@ -1,19 +1,19 @@
 --[[
-    Roblox Client Inspector
-    ------------------------
-    Features:
-    • Floating draggable button
-    • Draggable inspector window
-    • Search Instances / Classes / Attributes / Values
-    • Lazy-loaded Instance tree
-    • Attribute viewer
-    • Live DescendantAdded detection
-    • Rescan
-    • Expand All / Collapse All
-    • JSON export
-    • Instance limit + yielding for performance
+Roblox Client Inspector
+------------------------
+Features:
+• Floating draggable button
+• Draggable inspector window
+• Search Instances / Classes / Attributes / Values
+• Lazy-loaded Instance tree
+• Attribute viewer
+• Live DescendantAdded detection
+• Rescan
+• Expand All / Collapse All
+• JSON export
+• Instance limit + yielding for performance
 
-    This does NOT bypass Roblox replication/security.
+This does NOT bypass Roblox replication/security.
 ]]
 
 ------------------------------------------------------------
@@ -63,6 +63,8 @@ screenGui.IgnoreGuiInset = true
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
 screenGui.DisplayOrder = 2147483647
 screenGui.DisplayOrder = 10000 -- Keep inspector above other game ScreenGuis
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.DisplayOrder = 2147483647 -- Put inspector ScreenGui above other game ScreenGuis
 screenGui.Parent = playerGui
 
 ------------------------------------------------------------
@@ -167,8 +169,8 @@ closeCorner.CornerRadius = UDim.new(0, 5)
 closeCorner.Parent = closeButton
 
 closeButton.Activated:Connect(function()
-    mainFrame.Visible = false
-    toggleButton.Text = "Open"
+mainFrame.Visible = false
+toggleButton.Text = "Open"
 end)
 
 ------------------------------------------------------------
@@ -209,63 +211,56 @@ toolbar.ZIndex = 101
 toolbar.Parent = mainFrame
 
 local function createButton(name, text, position, width)
-    local button = Instance.new("TextButton")
+local button = Instance.new("TextButton")
 
-    button.Name = name
-    button.Size = UDim2.fromOffset(width or 90, 32)
-    button.Position = position
+button.Name = name
+button.Size = UDim2.fromOffset(width or 90, 32)
+button.Position = position
 
-    button.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-    button.TextColor3 = Color3.fromRGB(255, 255, 255)
+button.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+button.TextColor3 = Color3.fromRGB(255, 255, 255)
 
-    button.Text = text
-    button.TextSize = 13
-    button.Font = Enum.Font.Gotham
+button.Text = text
+button.TextSize = 13
+button.Font = Enum.Font.Gotham
 
-    button.BorderSizePixel = 0
-    button.ZIndex = 12
-    button.Parent = toolbar
+button.BorderSizePixel = 0
+button.ZIndex = 12
+button.Parent = toolbar
 
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 5)
-    corner.Parent = button
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 5)
+corner.Parent = button
 
-    return button
+return button
 end
 
 local rescanButton = createButton(
-    "Rescan",
-    "Rescan",
-    UDim2.fromOffset(0, 0),
-    80
+"Rescan",
+"Rescan",
+UDim2.fromOffset(0, 0),
+80
 )
 
 local expandButton = createButton(
-    "Expand",
-    "Expand All",
-    UDim2.fromOffset(90, 0),
-    90
+"Expand",
+"Expand All",
+UDim2.fromOffset(90, 0),
+90
 )
 
 local collapseButton = createButton(
-    "Collapse",
-    "Collapse All",
-    UDim2.fromOffset(190, 0),
-    100
+"Collapse",
+"Collapse All",
+UDim2.fromOffset(190, 0),
+100
 )
 
 local jsonButton = createButton(
-    "JSON",
-    "JSON",
-    UDim2.fromOffset(300, 0),
-    70
-)
-
-local copySelectedButton = createButton(
-    "CopySelected",
-    "Copy Selected",
-    UDim2.fromOffset(375, 0),
-    105
+"JSON",
+"JSON",
+UDim2.fromOffset(300, 0),
+70
 )
 
 ------------------------------------------------------------
@@ -374,137 +369,137 @@ detailsLayout.Parent = detailsScroll
 ------------------------------------------------------------
 
 local function getPath(instance)
-    local parts = {}
-    local current = instance
+local parts = {}
+local current = instance
 
-    while current and current ~= game do
-        table.insert(parts, 1, current.Name)
-        current = current.Parent
-    end
+while current and current ~= game do
+table.insert(parts, 1, current.Name)
+current = current.Parent
+end
 
-    if current == game then
-        table.insert(parts, 1, "game")
-    end
+if current == game then
+table.insert(parts, 1, "game")
+end
 
-    return table.concat(parts, ".")
+return table.concat(parts, ".")
 end
 
 ------------------------------------------------------------
 
 local function serializeValue(value)
-    local valueType = typeof(value)
+local valueType = typeof(value)
 
-    if valueType == "Vector3" then
-        return {
-            type = "Vector3",
-            x = value.X,
-            y = value.Y,
-            z = value.Z
-        }
+if valueType == "Vector3" then
+return {
+type = "Vector3",
+x = value.X,
+y = value.Y,
+z = value.Z
+}
 
-    elseif valueType == "Vector2" then
-        return {
-            type = "Vector2",
-            x = value.X,
-            y = value.Y
-        }
+elseif valueType == "Vector2" then
+return {
+type = "Vector2",
+x = value.X,
+y = value.Y
+}
 
-    elseif valueType == "Color3" then
-        return {
-            type = "Color3",
-            r = value.R,
-            g = value.G,
-            b = value.B
-        }
+elseif valueType == "Color3" then
+return {
+type = "Color3",
+r = value.R,
+g = value.G,
+b = value.B
+}
 
-    elseif valueType == "CFrame" then
-        local components = {value:GetComponents()}
+elseif valueType == "CFrame" then
+local components = {value:GetComponents()}
 
-        return {
-            type = "CFrame",
-            components = components
-        }
+return {
+type = "CFrame",
+components = components
+}
 
-    elseif valueType == "UDim2" then
-        return {
-            type = "UDim2",
-            xScale = value.X.Scale,
-            xOffset = value.X.Offset,
-            yScale = value.Y.Scale,
-            yOffset = value.Y.Offset
-        }
+elseif valueType == "UDim2" then
+return {
+type = "UDim2",
+xScale = value.X.Scale,
+xOffset = value.X.Offset,
+yScale = value.Y.Scale,
+yOffset = value.Y.Offset
+}
 
-    elseif valueType == "UDim" then
-        return {
-            type = "UDim",
-            scale = value.Scale,
-            offset = value.Offset
-        }
+elseif valueType == "UDim" then
+return {
+type = "UDim",
+scale = value.Scale,
+offset = value.Offset
+}
 
-    elseif valueType == "BrickColor" then
-        return {
-            type = "BrickColor",
-            name = value.Name,
-            number = value.Number
-        }
+elseif valueType == "BrickColor" then
+return {
+type = "BrickColor",
+name = value.Name,
+number = value.Number
+}
 
-    elseif valueType == "EnumItem" then
-        return {
-            type = "EnumItem",
-            enum = tostring(value.EnumType),
-            name = value.Name
-        }
+elseif valueType == "EnumItem" then
+return {
+type = "EnumItem",
+enum = tostring(value.EnumType),
+name = value.Name
+}
 
-    elseif valueType == "Instance" then
-        return {
-            type = "Instance",
-            path = value and getPath(value) or "nil"
-        }
+elseif valueType == "Instance" then
+return {
+type = "Instance",
+path = value and getPath(value) or "nil"
+}
 
-    elseif valueType == "table" then
-        return {
-            type = "table",
-            value = tostring(value)
-        }
+elseif valueType == "table" then
+return {
+type = "table",
+value = tostring(value)
+}
 
-    else
-        return {
-            type = valueType,
-            value = value
-        }
-    end
+else
+return {
+type = valueType,
+value = value
+}
+end
 end
 
 ------------------------------------------------------------
 
 local function getAttributeCount(instance)
-    local count = 0
+local count = 0
 
-    local success, attributes = pcall(function()
-        return instance:GetAttributes()
-    end)
+local success, attributes = pcall(function()
+return instance:GetAttributes()
+end)
 
-    if success and attributes then
-        for _ in pairs(attributes) do
-            count += 1
-        end
-    end
+if success and attributes then
+for _ in pairs(attributes) do
+count += 1
+end
+end
 
-    return count
+return count
 end
 
 ------------------------------------------------------------
 
 local function getAttributes(instance)
-    local success, attributes = pcall(function()
-        return instance:GetAttributes()
-    end)
+local success, attributes = pcall(function()
+return instance:GetAttributes()
+end)
 
-    if success then
-        return attributes
-    end
+if success then
+return attributes
+end
 
-    return {}
+return {}
 end
 
 ------------------------------------------------------------
@@ -512,45 +507,45 @@ end
 ------------------------------------------------------------
 
 local function instanceMatches(instance)
-    if currentSearch == "" then
-        return true
-    end
+if currentSearch == "" then
+return true
+end
 
-    local search = string.lower(currentSearch)
+local search = string.lower(currentSearch)
 
-    if string.find(string.lower(instance.Name), search, 1, true) then
-        return true
-    end
+if string.find(string.lower(instance.Name), search, 1, true) then
+return true
+end
 
-    if string.find(string.lower(instance.ClassName), search, 1, true) then
-        return true
-    end
+if string.find(string.lower(instance.ClassName), search, 1, true) then
+return true
+end
 
-    local attributes = getAttributes(instance)
+local attributes = getAttributes(instance)
 
-    for name, value in pairs(attributes) do
-        if string.find(string.lower(tostring(name)), search, 1, true) then
-            return true
-        end
+for name, value in pairs(attributes) do
+if string.find(string.lower(tostring(name)), search, 1, true) then
+return true
+end
 
-        if string.find(string.lower(tostring(value)), search, 1, true) then
-            return true
-        end
-    end
+if string.find(string.lower(tostring(value)), search, 1, true) then
+return true
+end
+end
 
-    return false
+return false
 end
 
 ------------------------------------------------------------
 
 local function hasMatchingDescendant(instance)
-    for _, descendant in ipairs(instance:GetDescendants()) do
-        if instanceMatches(descendant) then
-            return true
-        end
-    end
+for _, descendant in ipairs(instance:GetDescendants()) do
+if instanceMatches(descendant) then
+return true
+end
+end
 
-    return false
+return false
 end
 
 ------------------------------------------------------------
@@ -558,92 +553,92 @@ end
 ------------------------------------------------------------
 
 local function clearDetails()
-    for _, child in ipairs(detailsScroll:GetChildren()) do
-        if not child:IsA("UIListLayout") then
-            child:Destroy()
-        end
-    end
+for _, child in ipairs(detailsScroll:GetChildren()) do
+if not child:IsA("UIListLayout") then
+child:Destroy()
+end
+end
 end
 
 ------------------------------------------------------------
 
 local function addDetail(text, height)
-    local label = Instance.new("TextLabel")
+local label = Instance.new("TextLabel")
 
-    label.Size = UDim2.new(1, -10, 0, height or 28)
-    label.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+label.Size = UDim2.new(1, -10, 0, height or 28)
+label.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 
-    label.TextColor3 = Color3.fromRGB(225, 225, 225)
-    label.Text = text
+label.TextColor3 = Color3.fromRGB(225, 225, 225)
+label.Text = text
 
-    label.TextSize = 13
-    label.Font = Enum.Font.Gotham
+label.TextSize = 13
+label.Font = Enum.Font.Gotham
 
-    label.TextXAlignment = Enum.TextXAlignment.Left
-    label.TextYAlignment = Enum.TextYAlignment.Top
+label.TextXAlignment = Enum.TextXAlignment.Left
+label.TextYAlignment = Enum.TextYAlignment.Top
 
-    label.TextWrapped = true
-    label.BorderSizePixel = 0
+label.TextWrapped = true
+label.BorderSizePixel = 0
 
-    label.ZIndex = 13
-    label.Parent = detailsScroll
+label.ZIndex = 13
+label.Parent = detailsScroll
 
-    local padding = Instance.new("UIPadding")
-    padding.PaddingLeft = UDim.new(0, 8)
-    padding.PaddingRight = UDim.new(0, 8)
-    padding.PaddingTop = UDim.new(0, 5)
-    padding.PaddingBottom = UDim.new(0, 5)
-    padding.Parent = label
+local padding = Instance.new("UIPadding")
+padding.PaddingLeft = UDim.new(0, 8)
+padding.PaddingRight = UDim.new(0, 8)
+padding.PaddingTop = UDim.new(0, 5)
+padding.PaddingBottom = UDim.new(0, 5)
+padding.Parent = label
 
-    return label
+return label
 end
 
 ------------------------------------------------------------
 
 local function showDetails(instance)
-    selectedInstance = instance
+selectedInstance = instance
 
-    clearDetails()
+clearDetails()
 
-    if not instance then
-        addDetail("Select an Instance to view its information.", 45)
-        return
-    end
+if not instance then
+addDetail("Select an Instance to view its information.", 45)
+return
+end
 
-    local attributes = getAttributes(instance)
+local attributes = getAttributes(instance)
 
-    addDetail("Name: " .. instance.Name)
-    addDetail("Class: " .. instance.ClassName)
-    addDetail("Path: " .. getPath(instance), 45)
+addDetail("Name: " .. instance.Name)
+addDetail("Class: " .. instance.ClassName)
+addDetail("Path: " .. getPath(instance), 45)
 
-    local children = 0
+local children = 0
 
-    pcall(function()
-        children = #instance:GetChildren()
-    end)
+pcall(function()
+children = #instance:GetChildren()
+end)
 
-    addDetail("Children: " .. tostring(children))
-    addDetail("Attributes: " .. tostring(getAttributeCount(instance)))
+addDetail("Children: " .. tostring(children))
+addDetail("Attributes: " .. tostring(getAttributeCount(instance)))
 
-    if next(attributes) then
-        addDetail("ATTRIBUTE VALUES", 30)
+if next(attributes) then
+addDetail("ATTRIBUTE VALUES", 30)
 
-        for name, value in pairs(attributes) do
-            local valueText = tostring(value)
+for name, value in pairs(attributes) do
+local valueText = tostring(value)
 
-            local text =
-                tostring(name)
-                .. " = "
-                .. valueText
-                .. "  ["
-                .. typeof(value)
-                .. "]"
+local text =
+tostring(name)
+.. " = "
+.. valueText
+.. "  ["
+.. typeof(value)
+.. "]"
 
-            addDetail(text, 42)
-        end
-    else
-        addDetail("No attributes.", 35)
-    end
+addDetail(text, 42)
+end
+else
+addDetail("No attributes.", 35)
+end
 end
 
 ------------------------------------------------------------
@@ -651,107 +646,107 @@ end
 ------------------------------------------------------------
 
 local function clearTree()
-    for _, child in ipairs(treeScroll:GetChildren()) do
-        if not child:IsA("UIListLayout") then
-            child:Destroy()
-        end
-    end
+for _, child in ipairs(treeScroll:GetChildren()) do
+if not child:IsA("UIListLayout") then
+child:Destroy()
+end
+end
 end
 
 ------------------------------------------------------------
 
 local function createNode(instance, depth)
-    if currentSearch ~= "" then
-        if not instanceMatches(instance)
-            and not hasMatchingDescendant(instance) then
-            return
-        end
-    end
+if currentSearch ~= "" then
+if not instanceMatches(instance)
+and not hasMatchingDescendant(instance) then
+return
+end
+end
 
-    local children = {}
+local children = {}
 
-    pcall(function()
-        children = instance:GetChildren()
-    end)
+pcall(function()
+children = instance:GetChildren()
+end)
 
-    local hasChildren = #children > 0
-    local isExpanded = expanded[instance] == true
+local hasChildren = #children > 0
+local isExpanded = expanded[instance] == true
 
-    local button = Instance.new("TextButton")
+local button = Instance.new("TextButton")
 
-    button.Name = "Node"
-    button.Size = UDim2.new(1, -5, 0, 27)
+button.Name = "Node"
+button.Size = UDim2.new(1, -5, 0, 27)
 
-    button.BackgroundColor3 =
-        selectedInstance == instance
-        and Color3.fromRGB(55, 55, 55)
-        or Color3.fromRGB(25, 25, 25)
+button.BackgroundColor3 =
+selectedInstance == instance
+and Color3.fromRGB(55, 55, 55)
+or Color3.fromRGB(25, 25, 25)
 
-    button.BorderSizePixel = 0
-    button.TextColor3 = Color3.fromRGB(225, 225, 225)
+button.BorderSizePixel = 0
+button.TextColor3 = Color3.fromRGB(225, 225, 225)
 
-    button.TextSize = 13
-    button.Font = Enum.Font.Gotham
+button.TextSize = 13
+button.Font = Enum.Font.Gotham
 
-    button.TextXAlignment = Enum.TextXAlignment.Left
-    button.AutoButtonColor = true
+button.TextXAlignment = Enum.TextXAlignment.Left
+button.AutoButtonColor = true
 
-    button.ZIndex = 13
-    button.Parent = treeScroll
+button.ZIndex = 13
+button.Parent = treeScroll
 
-    local arrow = ""
+local arrow = ""
 
-    if hasChildren then
-        arrow = isExpanded and "▼ " or "▶ "
-    else
-        arrow = "   "
-    end
+if hasChildren then
+arrow = isExpanded and "▼ " or "▶ "
+else
+arrow = "   "
+end
 
-    local attributeNumber = getAttributeCount(instance)
+local attributeNumber = getAttributeCount(instance)
 
-    local attributeText = ""
+local attributeText = ""
 
-    if attributeNumber > 0 then
-        attributeText = "  [" .. tostring(attributeNumber) .. " attr]"
-    end
+if attributeNumber > 0 then
+attributeText = "  [" .. tostring(attributeNumber) .. " attr]"
+end
 
-    button.Text =
-        string.rep("    ", depth)
-        .. arrow
-        .. instance.Name
-        .. "  <"
-        .. instance.ClassName
-        .. ">"
-        .. attributeText
+button.Text =
+string.rep("    ", depth)
+.. arrow
+.. instance.Name
+.. "  <"
+.. instance.ClassName
+.. ">"
+.. attributeText
 
-    button.MouseButton1Click:Connect(function()
-        showDetails(instance)
+button.MouseButton1Click:Connect(function()
+showDetails(instance)
 
-        if hasChildren then
-            expanded[instance] = not expanded[instance]
-            rebuildTree()
-        else
-            rebuildTree()
-        end
-    end)
+if hasChildren then
+expanded[instance] = not expanded[instance]
+rebuildTree()
+else
+rebuildTree()
+end
+end)
 
-    if isExpanded then
-        for _, child in ipairs(children) do
-            createNode(child, depth + 1)
-        end
-    end
+if isExpanded then
+for _, child in ipairs(children) do
+createNode(child, depth + 1)
+end
+end
 end
 
 ------------------------------------------------------------
 
 function rebuildTree()
-    clearTree()
+clearTree()
 
-    createNode(game, 0)
+createNode(game, 0)
 
-    task.defer(function()
-        treeScroll.CanvasPosition = treeScroll.CanvasPosition
-    end)
+task.defer(function()
+treeScroll.CanvasPosition = treeScroll.CanvasPosition
+end)
 end
 
 ------------------------------------------------------------
@@ -759,96 +754,96 @@ end
 ------------------------------------------------------------
 
 local function scanInstance(instance, generation)
-    if scanGeneration ~= generation then
-        return
-    end
+if scanGeneration ~= generation then
+return
+end
 
-    if instanceCount >= MAX_INSTANCES then
-        return
-    end
+if instanceCount >= MAX_INSTANCES then
+return
+end
 
-    if scanned[instance] then
-        return
-    end
+if scanned[instance] then
+return
+end
 
-    scanned[instance] = true
-    instanceCount += 1
+scanned[instance] = true
+instanceCount += 1
 
-    local attrs = getAttributes(instance)
+local attrs = getAttributes(instance)
 
-    for _ in pairs(attrs) do
-        attributeCount += 1
-    end
+for _ in pairs(attrs) do
+attributeCount += 1
+end
 
-    if instanceCount % YIELD_EVERY == 0 then
-        statusLabel.Text =
-            "Scanning... "
-            .. tostring(instanceCount)
-            .. " instances"
+if instanceCount % YIELD_EVERY == 0 then
+statusLabel.Text =
+"Scanning... "
+.. tostring(instanceCount)
+.. " instances"
 
-        task.wait()
-    end
+task.wait()
+end
 
-    local children = {}
+local children = {}
 
-    local success = pcall(function()
-        children = instance:GetChildren()
-    end)
+local success = pcall(function()
+children = instance:GetChildren()
+end)
 
-    if not success then
-        return
-    end
+if not success then
+return
+end
 
-    for _, child in ipairs(children) do
-        if scanGeneration ~= generation then
-            return
-        end
+for _, child in ipairs(children) do
+if scanGeneration ~= generation then
+return
+end
 
-        if instanceCount >= MAX_INSTANCES then
-            return
-        end
+if instanceCount >= MAX_INSTANCES then
+return
+end
 
-        scanInstance(child, generation)
-    end
+scanInstance(child, generation)
+end
 end
 
 ------------------------------------------------------------
 
 local function performScan()
-    if scanInProgress then
-        return
-    end
+if scanInProgress then
+return
+end
 
-    scanInProgress = true
-    scanGeneration += 1
+scanInProgress = true
+scanGeneration += 1
 
-    local generation = scanGeneration
+local generation = scanGeneration
 
-    scanned = {}
-    instanceCount = 0
-    attributeCount = 0
-    selectedInstance = nil
+scanned = {}
+instanceCount = 0
+attributeCount = 0
+selectedInstance = nil
 
-    statusLabel.Text = "Scanning..."
+statusLabel.Text = "Scanning..."
 
-    task.spawn(function()
-        scanInstance(game, generation)
+task.spawn(function()
+scanInstance(game, generation)
 
-        if scanGeneration ~= generation then
-            return
-        end
+if scanGeneration ~= generation then
+return
+end
 
-        scanInProgress = false
+scanInProgress = false
 
-        statusLabel.Text =
-            "Instances: "
-            .. tostring(instanceCount)
-            .. " | Attributes: "
-            .. tostring(attributeCount)
+statusLabel.Text =
+"Instances: "
+.. tostring(instanceCount)
+.. " | Attributes: "
+.. tostring(attributeCount)
 
-        rebuildTree()
-        showDetails(nil)
-    end)
+rebuildTree()
+showDetails(nil)
+end)
 end
 
 ------------------------------------------------------------
@@ -856,211 +851,105 @@ end
 ------------------------------------------------------------
 
 local function buildJSON()
-    local output = {}
+local output = {}
 
-    for instance in pairs(scanned) do
-        local attributes = {}
+for instance in pairs(scanned) do
+local attributes = {}
 
-        for name, value in pairs(getAttributes(instance)) do
-            attributes[name] = serializeValue(value)
-        end
+for name, value in pairs(getAttributes(instance)) do
+attributes[name] = serializeValue(value)
+end
 
-        table.insert(output, {
-            name = instance.Name,
-            className = instance.ClassName,
-            path = getPath(instance),
-            attributes = attributes
-        })
-    end
+table.insert(output, {
+name = instance.Name,
+className = instance.ClassName,
+path = getPath(instance),
+attributes = attributes
+})
+end
 
-    table.sort(output, function(a, b)
-        return a.path < b.path
-    end)
+table.sort(output, function(a, b)
+return a.path < b.path
+end)
 
-    return HttpService:JSONEncode(output)
+return HttpService:JSONEncode(output)
 end
 
 ------------------------------------------------------------
 
 local function showJSON()
-    local json = buildJSON()
+local json = buildJSON()
 
-    local jsonGui = Instance.new("Frame")
-    jsonGui.Name = "JSONWindow"
+local jsonGui = Instance.new("Frame")
+jsonGui.Name = "JSONWindow"
 
-    jsonGui.Size = UDim2.fromOffset(750, 500)
-    jsonGui.Position = UDim2.new(0.5, -375, 0.5, -250)
+jsonGui.Size = UDim2.fromOffset(750, 500)
+jsonGui.Position = UDim2.new(0.5, -375, 0.5, -250)
 
-    jsonGui.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
-    jsonGui.BorderSizePixel = 0
-    jsonGui.ZIndex = 2000
-    jsonGui.Parent = screenGui
+jsonGui.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
+jsonGui.BorderSizePixel = 0
+jsonGui.ZIndex = 2000
+jsonGui.Parent = screenGui
 
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 8)
-    corner.Parent = jsonGui
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 8)
+corner.Parent = jsonGui
 
-    local title = Instance.new("TextLabel")
-    title.Size = UDim2.new(1, -50, 0, 40)
-    title.Position = UDim2.fromOffset(10, 0)
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -50, 0, 40)
+title.Position = UDim2.fromOffset(10, 0)
 
-    title.BackgroundTransparency = 1
-    title.Text = "JSON Export"
-    title.TextColor3 = Color3.fromRGB(255, 255, 255)
-    title.TextSize = 17
-    title.Font = Enum.Font.GothamBold
-    title.TextXAlignment = Enum.TextXAlignment.Left
-    title.ZIndex = 31
-    title.Parent = jsonGui
+title.BackgroundTransparency = 1
+title.Text = "JSON Export"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.TextSize = 17
+title.Font = Enum.Font.GothamBold
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.ZIndex = 31
+title.Parent = jsonGui
 
-    local close = Instance.new("TextButton")
-    close.Size = UDim2.fromOffset(35, 30)
-    close.Position = UDim2.new(1, -42, 0, 5)
+local close = Instance.new("TextButton")
+close.Size = UDim2.fromOffset(35, 30)
+close.Position = UDim2.new(1, -42, 0, 5)
 
-    close.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-    close.TextColor3 = Color3.fromRGB(255, 255, 255)
-    close.Text = "✕"
-    close.TextSize = 15
-    close.BorderSizePixel = 0
-    close.ZIndex = 31
-    close.Parent = jsonGui
+close.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+close.TextColor3 = Color3.fromRGB(255, 255, 255)
+close.Text = "✕"
+close.TextSize = 15
+close.BorderSizePixel = 0
+close.ZIndex = 31
+close.Parent = jsonGui
 
-    local closeCorner = Instance.new("UICorner")
-    closeCorner.CornerRadius = UDim.new(0, 5)
-    closeCorner.Parent = close
+local closeCorner = Instance.new("UICorner")
+closeCorner.CornerRadius = UDim.new(0, 5)
+closeCorner.Parent = close
 
-    close.MouseButton1Click:Connect(function()
-        jsonGui:Destroy()
-    end)
+close.MouseButton1Click:Connect(function()
+jsonGui:Destroy()
+end)
 
-    local textBox = Instance.new("TextBox")
-    textBox.Size = UDim2.new(1, -20, 1, -55)
-    textBox.Position = UDim2.fromOffset(10, 45)
+local textBox = Instance.new("TextBox")
+textBox.Size = UDim2.new(1, -20, 1, -55)
+textBox.Position = UDim2.fromOffset(10, 45)
 
-    textBox.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
-    textBox.TextColor3 = Color3.fromRGB(220, 220, 220)
+textBox.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+textBox.TextColor3 = Color3.fromRGB(220, 220, 220)
 
-    textBox.Text = json
-    textBox.TextSize = 12
-    textBox.Font = Enum.Font.Code
+textBox.Text = json
+textBox.TextSize = 12
+textBox.Font = Enum.Font.Code
 
-    textBox.TextXAlignment = Enum.TextXAlignment.Left
-    textBox.TextYAlignment = Enum.TextYAlignment.Top
+textBox.TextXAlignment = Enum.TextXAlignment.Left
+textBox.TextYAlignment = Enum.TextYAlignment.Top
 
-    textBox.MultiLine = true
-    textBox.ClearTextOnFocus = false
+textBox.MultiLine = true
+textBox.ClearTextOnFocus = false
 
-    textBox.TextEditable = true
-    textBox.BorderSizePixel = 0
+textBox.TextEditable = true
+textBox.BorderSizePixel = 0
 
-    textBox.ZIndex = 31
-    textBox.Parent = jsonGui
-end
-
-------------------------------------------------------------
--- COPY SELECTED INSTANCE
-------------------------------------------------------------
-
-local function showSelectedCopy()
-    if not selectedInstance then
-        statusLabel.Text = "No Instance selected"
-        return
-    end
-
-    local instance = selectedInstance
-    local attributes = getAttributes(instance)
-    local lines = {}
-
-    table.insert(lines, "Name: " .. instance.Name)
-    table.insert(lines, "Class: " .. instance.ClassName)
-    table.insert(lines, "Path: " .. getPath(instance))
-
-    local children = 0
-    pcall(function()
-        children = #instance:GetChildren()
-    end)
-
-    table.insert(lines, "Children: " .. tostring(children))
-    table.insert(lines, "Attributes: " .. tostring(getAttributeCount(instance)))
-    table.insert(lines, "")
-    table.insert(lines, "ATTRIBUTE VALUES")
-
-    if next(attributes) then
-        for name, value in pairs(attributes) do
-            table.insert(lines, tostring(name) .. " = " .. tostring(value) .. " [" .. typeof(value) .. "]")
-        end
-    else
-        table.insert(lines, "No attributes.")
-    end
-
-    local copyText = table.concat(lines, "\n")
-
-    local copyGui = Instance.new("Frame")
-    copyGui.Name = "CopySelectedWindow"
-    copyGui.Size = UDim2.fromOffset(650, 420)
-    copyGui.Position = UDim2.new(0.5, -325, 0.5, -210)
-    copyGui.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
-    copyGui.BorderSizePixel = 0
-    copyGui.ZIndex = 2000
-    copyGui.Parent = screenGui
-
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 8)
-    corner.Parent = copyGui
-
-    local title = Instance.new("TextLabel")
-    title.Size = UDim2.new(1, -50, 0, 40)
-    title.Position = UDim2.fromOffset(10, 0)
-    title.BackgroundTransparency = 1
-    title.Text = "Copy Selected Instance"
-    title.TextColor3 = Color3.fromRGB(255, 255, 255)
-    title.TextSize = 17
-    title.Font = Enum.Font.GothamBold
-    title.TextXAlignment = Enum.TextXAlignment.Left
-    title.ZIndex = 31
-    title.Parent = copyGui
-
-    local close = Instance.new("TextButton")
-    close.Size = UDim2.fromOffset(35, 30)
-    close.Position = UDim2.new(1, -42, 0, 5)
-    close.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-    close.TextColor3 = Color3.fromRGB(255, 255, 255)
-    close.Text = "✕"
-    close.TextSize = 15
-    close.BorderSizePixel = 0
-    close.ZIndex = 31
-    close.Parent = copyGui
-
-    local closeCorner = Instance.new("UICorner")
-    closeCorner.CornerRadius = UDim.new(0, 5)
-    closeCorner.Parent = close
-
-    close.MouseButton1Click:Connect(function()
-        copyGui:Destroy()
-    end)
-
-    local textBox = Instance.new("TextBox")
-    textBox.Size = UDim2.new(1, -20, 1, -55)
-    textBox.Position = UDim2.fromOffset(10, 45)
-    textBox.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
-    textBox.TextColor3 = Color3.fromRGB(220, 220, 220)
-    textBox.Text = copyText
-    textBox.TextSize = 13
-    textBox.Font = Enum.Font.Code
-    textBox.TextXAlignment = Enum.TextXAlignment.Left
-    textBox.TextYAlignment = Enum.TextYAlignment.Top
-    textBox.MultiLine = true
-    textBox.ClearTextOnFocus = false
-    textBox.TextEditable = true
-    textBox.BorderSizePixel = 0
-    textBox.ZIndex = 31
-    textBox.Parent = copyGui
-
-    task.defer(function()
-        textBox:CaptureFocus()
-        textBox.CursorPosition = #textBox.Text + 1
-        textBox.SelectionStart = 1
-    end)
+textBox.ZIndex = 31
+textBox.Parent = jsonGui
 end
 
 ------------------------------------------------------------
@@ -1068,27 +957,27 @@ end
 ------------------------------------------------------------
 
 local function expandAll()
-    for instance in pairs(scanned) do
-        local children = {}
+for instance in pairs(scanned) do
+local children = {}
 
-        pcall(function()
-            children = instance:GetChildren()
-        end)
+pcall(function()
+children = instance:GetChildren()
+end)
 
-        if #children > 0 then
-            expanded[instance] = true
-        end
-    end
+if #children > 0 then
+expanded[instance] = true
+end
+end
 
-    rebuildTree()
+rebuildTree()
 end
 
 ------------------------------------------------------------
 
 local function collapseAll()
-    expanded = {}
+expanded = {}
 
-    rebuildTree()
+rebuildTree()
 end
 
 ------------------------------------------------------------
@@ -1096,41 +985,41 @@ end
 ------------------------------------------------------------
 
 local function disconnectWatchers()
-    for _, connection in ipairs(connections) do
-        pcall(function()
-            connection:Disconnect()
-        end)
-    end
+for _, connection in ipairs(connections) do
+pcall(function()
+connection:Disconnect()
+end)
+end
 
-    connections = {}
+connections = {}
 end
 
 ------------------------------------------------------------
 
 local function startWatching()
-    disconnectWatchers()
+disconnectWatchers()
 
-    local connection = game.DescendantAdded:Connect(function(instance)
-        if not scanned[instance] then
-            task.spawn(function()
-                local before = instanceCount
+local connection = game.DescendantAdded:Connect(function(instance)
+if not scanned[instance] then
+task.spawn(function()
+local before = instanceCount
 
-                scanInstance(instance, scanGeneration)
+scanInstance(instance, scanGeneration)
 
-                if instanceCount ~= before then
-                    statusLabel.Text =
-                        "Instances: "
-                        .. tostring(instanceCount)
-                        .. " | Attributes: "
-                        .. tostring(attributeCount)
+if instanceCount ~= before then
+statusLabel.Text =
+"Instances: "
+.. tostring(instanceCount)
+.. " | Attributes: "
+.. tostring(attributeCount)
 
-                    rebuildTree()
-                end
-            end)
-        end
-    end)
+rebuildTree()
+end
+end)
+end
+end)
 
-    table.insert(connections, connection)
+table.insert(connections, connection)
 end
 
 ------------------------------------------------------------
@@ -1142,39 +1031,39 @@ local buttonDragStart
 local buttonStartPosition
 
 toggleButton.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1
-        or input.UserInputType == Enum.UserInputType.Touch then
+if input.UserInputType == Enum.UserInputType.MouseButton1
+or input.UserInputType == Enum.UserInputType.Touch then
 
-        buttonDragging = true
-        buttonDragStart = input.Position
-        buttonStartPosition = toggleButton.Position
+buttonDragging = true
+buttonDragStart = input.Position
+buttonStartPosition = toggleButton.Position
 
-        input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then
-                buttonDragging = false
-            end
-        end)
-    end
+input.Changed:Connect(function()
+if input.UserInputState == Enum.UserInputState.End then
+buttonDragging = false
+end
+end)
+end
 end)
 
 UserInputService.InputChanged:Connect(function(input)
-    if not buttonDragging then
-        return
-    end
+if not buttonDragging then
+return
+end
 
-    if input.UserInputType == Enum.UserInputType.MouseMovement
-        or input.UserInputType == Enum.UserInputType.Touch then
+if input.UserInputType == Enum.UserInputType.MouseMovement
+or input.UserInputType == Enum.UserInputType.Touch then
 
-        local delta = input.Position - buttonDragStart
+local delta = input.Position - buttonDragStart
 
-        toggleButton.Position = UDim2.new(
-            buttonStartPosition.X.Scale,
-            buttonStartPosition.X.Offset + delta.X,
+toggleButton.Position = UDim2.new(
+buttonStartPosition.X.Scale,
+buttonStartPosition.X.Offset + delta.X,
 
-            buttonStartPosition.Y.Scale,
-            buttonStartPosition.Y.Offset + delta.Y
-        )
-    end
+buttonStartPosition.Y.Scale,
+buttonStartPosition.Y.Offset + delta.Y
+)
+end
 end)
 
 ------------------------------------------------------------
@@ -1186,39 +1075,39 @@ local panelDragStart
 local panelStartPosition
 
 titleBar.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1
-        or input.UserInputType == Enum.UserInputType.Touch then
+if input.UserInputType == Enum.UserInputType.MouseButton1
+or input.UserInputType == Enum.UserInputType.Touch then
 
-        panelDragging = true
-        panelDragStart = input.Position
-        panelStartPosition = mainFrame.Position
+panelDragging = true
+panelDragStart = input.Position
+panelStartPosition = mainFrame.Position
 
-        input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then
-                panelDragging = false
-            end
-        end)
-    end
+input.Changed:Connect(function()
+if input.UserInputState == Enum.UserInputState.End then
+panelDragging = false
+end
+end)
+end
 end)
 
 UserInputService.InputChanged:Connect(function(input)
-    if not panelDragging then
-        return
-    end
+if not panelDragging then
+return
+end
 
-    if input.UserInputType == Enum.UserInputType.MouseMovement
-        or input.UserInputType == Enum.UserInputType.Touch then
+if input.UserInputType == Enum.UserInputType.MouseMovement
+or input.UserInputType == Enum.UserInputType.Touch then
 
-        local delta = input.Position - panelDragStart
+local delta = input.Position - panelDragStart
 
-        mainFrame.Position = UDim2.new(
-            panelStartPosition.X.Scale,
-            panelStartPosition.X.Offset + delta.X,
+mainFrame.Position = UDim2.new(
+panelStartPosition.X.Scale,
+panelStartPosition.X.Offset + delta.X,
 
-            panelStartPosition.Y.Scale,
-            panelStartPosition.Y.Offset + delta.Y
-        )
-    end
+panelStartPosition.Y.Scale,
+panelStartPosition.Y.Offset + delta.Y
+)
+end
 end)
 
 ------------------------------------------------------------
@@ -1226,44 +1115,38 @@ end)
 ------------------------------------------------------------
 
 toggleButton.Activated:Connect(function()
-    mainFrame.Visible = not mainFrame.Visible
+mainFrame.Visible = not mainFrame.Visible
 
-    if mainFrame.Visible then
-        toggleButton.Text = "Close"
-    else
-        toggleButton.Text = "Open"
-    end
+if mainFrame.Visible then
+toggleButton.Text = "Close"
+else
+toggleButton.Text = "Open"
+end
 end)
 
 ------------------------------------------------------------
 
 rescanButton.MouseButton1Click:Connect(function()
-    expanded = {}
-    performScan()
+expanded = {}
+performScan()
 end)
 
 ------------------------------------------------------------
 
 expandButton.MouseButton1Click:Connect(function()
-    expandAll()
+expandAll()
 end)
 
 ------------------------------------------------------------
 
 collapseButton.MouseButton1Click:Connect(function()
-    collapseAll()
+collapseAll()
 end)
 
 ------------------------------------------------------------
 
 jsonButton.MouseButton1Click:Connect(function()
-    showJSON()
-end)
-
-------------------------------------------------------------
-
-copySelectedButton.MouseButton1Click:Connect(function()
-    showSelectedCopy()
+showJSON()
 end)
 
 ------------------------------------------------------------
@@ -1271,9 +1154,9 @@ end)
 ------------------------------------------------------------
 
 searchBox:GetPropertyChangedSignal("Text"):Connect(function()
-    currentSearch = searchBox.Text
+currentSearch = searchBox.Text
 
-    rebuildTree()
+rebuildTree()
 end)
 
 ------------------------------------------------------------
@@ -1281,59 +1164,59 @@ end)
 ------------------------------------------------------------
 
 local function updateMobileLayout()
-    local camera = workspace.CurrentCamera
-    if not camera then
-        return
-    end
+local camera = workspace.CurrentCamera
+if not camera then
+return
+end
 
-    local viewport = camera.ViewportSize
-    local isMobile = viewport.X <= 600
+local viewport = camera.ViewportSize
+local isMobile = viewport.X <= 600
 
-    if isMobile then
-        mainFrame.Size = UDim2.new(0.94, 0, 0.88, 0)
-        mainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
-        mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+if isMobile then
+mainFrame.Size = UDim2.new(0.94, 0, 0.88, 0)
+mainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
 
-        titleLabel.Size = UDim2.new(0.40, 0, 1, 0)
-        titleLabel.TextSize = 15
-        searchBox.Size = UDim2.new(0.28, 0, 0, 30)
-        searchBox.Position = UDim2.new(0.47, 0, 0, 6)
-        searchBox.TextSize = 12
+titleLabel.Size = UDim2.new(0.40, 0, 1, 0)
+titleLabel.TextSize = 15
+searchBox.Size = UDim2.new(0.28, 0, 0, 30)
+searchBox.Position = UDim2.new(0.47, 0, 0, 6)
+searchBox.TextSize = 12
 
-        toolbar.Size = UDim2.new(1, -20, 0, 70)
-        statusLabel.Visible = false
+toolbar.Size = UDim2.new(1, -20, 0, 70)
+statusLabel.Visible = false
 
-        treeFrame.Size = UDim2.new(1, -20, 0.43, 0)
-        treeFrame.Position = UDim2.new(0, 10, 0, 95)
+treeFrame.Size = UDim2.new(1, -20, 0.43, 0)
+treeFrame.Position = UDim2.new(0, 10, 0, 95)
 
-        detailsFrame.Size = UDim2.new(1, -20, 0.43, 0)
-        detailsFrame.Position = UDim2.new(0, 10, 0.51, 0)
-    else
-        mainFrame.Size = UDim2.new(0.94, 0, 0.88, 0)
-        mainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
-        mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+detailsFrame.Size = UDim2.new(1, -20, 0.43, 0)
+detailsFrame.Position = UDim2.new(0, 10, 0.51, 0)
+else
+mainFrame.Size = UDim2.new(0.94, 0, 0.88, 0)
+mainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
 
-        titleLabel.Size = UDim2.new(0.42, 0, 1, 0)
-        titleLabel.TextSize = 18
-        searchBox.Size = UDim2.new(0.32, 0, 0, 32)
-        searchBox.Position = UDim2.new(0.54, 0, 0, 5)
-        searchBox.TextSize = 14
+titleLabel.Size = UDim2.new(0.42, 0, 1, 0)
+titleLabel.TextSize = 18
+searchBox.Size = UDim2.new(0.32, 0, 0, 32)
+searchBox.Position = UDim2.new(0.54, 0, 0, 5)
+searchBox.TextSize = 14
 
-        toolbar.Size = UDim2.new(1, -20, 0, 40)
-        statusLabel.Visible = true
+toolbar.Size = UDim2.new(1, -20, 0, 40)
+statusLabel.Visible = true
 
-        treeFrame.Size = UDim2.new(0.52, -15, 1, -105)
-        treeFrame.Position = UDim2.fromOffset(10, 95)
+treeFrame.Size = UDim2.new(0.52, -15, 1, -105)
+treeFrame.Position = UDim2.fromOffset(10, 95)
 
-        detailsFrame.Size = UDim2.new(0.48, -15, 1, -105)
-        detailsFrame.Position = UDim2.new(0.52, 5, 0, 95)
-    end
+detailsFrame.Size = UDim2.new(0.48, -15, 1, -105)
+detailsFrame.Position = UDim2.new(0.52, 5, 0, 95)
+end
 end
 
 updateMobileLayout()
 
 if workspace.CurrentCamera then
-    workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updateMobileLayout)
+workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updateMobileLayout)
 end
 
 ------------------------------------------------------------
