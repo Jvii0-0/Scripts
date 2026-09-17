@@ -850,106 +850,187 @@ end
 -- JSON
 ------------------------------------------------------------
 
-local function buildJSON()
-local output = {}
+-- ============================================================
+-- JSON EXPORT
+-- ============================================================
 
-for instance in pairs(scanned) do
-local attributes = {}
-
-for name, value in pairs(getAttributes(instance)) do
-attributes[name] = serializeValue(value)
-end
-
-table.insert(output, {
-name = instance.Name,
-className = instance.ClassName,
-path = getPath(instance),
-attributes = attributes
-})
-end
-
-table.sort(output, function(a, b)
-return a.path < b.path
-end)
-
-return HttpService:JSONEncode(output)
-end
-
-------------------------------------------------------------
+local JSON_YIELD_EVERY = 100
 
 local function showJSON()
-local json = buildJSON()
+    -- Create the JSON window FIRST.
+    -- This means the user sees something immediately after clicking.
+    local jsonGui = Instance.new("Frame")
+    jsonGui.Name = "JSONExport"
+    jsonGui.Size = UDim2.new(0, 750, 0, 500)
+    jsonGui.Position = UDim2.new(0.5, -375, 0.5, -250)
+    jsonGui.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+    jsonGui.BorderSizePixel = 0
+    jsonGui.ZIndex = 2000
+    jsonGui.Parent = screenGui
 
-local jsonGui = Instance.new("Frame")
-jsonGui.Name = "JSONWindow"
+    local jsonCorner = Instance.new("UICorner")
+    jsonCorner.CornerRadius = UDim.new(0, 8)
+    jsonCorner.Parent = jsonGui
 
-jsonGui.Size = UDim2.fromOffset(750, 500)
-jsonGui.Position = UDim2.new(0.5, -375, 0.5, -250)
+    -- Title
+    local jsonTitle = Instance.new("TextLabel")
+    jsonTitle.Size = UDim2.new(1, -50, 0, 40)
+    jsonTitle.Position = UDim2.new(0, 15, 0, 0)
+    jsonTitle.BackgroundTransparency = 1
+    jsonTitle.Text = "JSON Export"
+    jsonTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+    jsonTitle.TextSize = 18
+    jsonTitle.Font = Enum.Font.GothamBold
+    jsonTitle.TextXAlignment = Enum.TextXAlignment.Left
+    jsonTitle.ZIndex = 2001
+    jsonTitle.Parent = jsonGui
 
-jsonGui.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
-jsonGui.BorderSizePixel = 0
-jsonGui.ZIndex = 2000
-jsonGui.Parent = screenGui
+    -- Close button
+    local jsonClose = Instance.new("TextButton")
+    jsonClose.Size = UDim2.new(0, 35, 0, 30)
+    jsonClose.Position = UDim2.new(1, -45, 0, 5)
+    jsonClose.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+    jsonClose.BorderSizePixel = 0
+    jsonClose.Text = "X"
+    jsonClose.TextColor3 = Color3.fromRGB(255, 255, 255)
+    jsonClose.TextSize = 16
+    jsonClose.Font = Enum.Font.GothamBold
+    jsonClose.ZIndex = 2002
+    jsonClose.Parent = jsonGui
 
-local corner = Instance.new("UICorner")
-corner.CornerRadius = UDim.new(0, 8)
-corner.Parent = jsonGui
+    local closeCorner = Instance.new("UICorner")
+    closeCorner.CornerRadius = UDim.new(0, 5)
+    closeCorner.Parent = jsonClose
 
-local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1, -50, 0, 40)
-title.Position = UDim2.fromOffset(10, 0)
+    -- Status label
+    local jsonStatus = Instance.new("TextLabel")
+    jsonStatus.Size = UDim2.new(1, -30, 0, 25)
+    jsonStatus.Position = UDim2.new(0, 15, 0, 42)
+    jsonStatus.BackgroundTransparency = 1
+    jsonStatus.Text = "Preparing JSON export..."
+    jsonStatus.TextColor3 = Color3.fromRGB(180, 180, 180)
+    jsonStatus.TextSize = 13
+    jsonStatus.Font = Enum.Font.Gotham
+    jsonStatus.TextXAlignment = Enum.TextXAlignment.Left
+    jsonStatus.ZIndex = 2001
+    jsonStatus.Parent = jsonGui
 
-title.BackgroundTransparency = 1
-title.Text = "JSON Export"
-title.TextColor3 = Color3.fromRGB(255, 255, 255)
-title.TextSize = 17
-title.Font = Enum.Font.GothamBold
-title.TextXAlignment = Enum.TextXAlignment.Left
-title.ZIndex = 31
-title.Parent = jsonGui
+    -- JSON text box
+    local jsonBox = Instance.new("TextBox")
+    jsonBox.Size = UDim2.new(1, -30, 1, -85)
+    jsonBox.Position = UDim2.new(0, 15, 0, 72)
+    jsonBox.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+    jsonBox.BorderSizePixel = 0
+    jsonBox.TextColor3 = Color3.fromRGB(220, 220, 220)
+    jsonBox.TextSize = 13
+    jsonBox.Font = Enum.Font.Code
+    jsonBox.TextXAlignment = Enum.TextXAlignment.Left
+    jsonBox.TextYAlignment = Enum.TextYAlignment.Top
+    jsonBox.MultiLine = true
+    jsonBox.ClearTextOnFocus = false
+    jsonBox.TextEditable = true
+    jsonBox.TextWrapped = false
+    jsonBox.Text = "Generating JSON..."
+    jsonBox.ZIndex = 2001
+    jsonBox.Parent = jsonGui
 
-local close = Instance.new("TextButton")
-close.Size = UDim2.fromOffset(35, 30)
-close.Position = UDim2.new(1, -42, 0, 5)
+    local boxCorner = Instance.new("UICorner")
+    boxCorner.CornerRadius = UDim.new(0, 5)
+    boxCorner.Parent = jsonBox
 
-close.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-close.TextColor3 = Color3.fromRGB(255, 255, 255)
-close.Text = "✕"
-close.TextSize = 15
-close.BorderSizePixel = 0
-close.ZIndex = 31
-close.Parent = jsonGui
+    jsonClose.MouseButton1Click:Connect(function()
+        jsonGui:Destroy()
+    end)
 
-local closeCorner = Instance.new("UICorner")
-closeCorner.CornerRadius = UDim.new(0, 5)
-closeCorner.Parent = close
+    -- Snapshot the scanned Instances.
+    -- We do this separately so the export has a stable set to process.
+    local instances = {}
 
-close.MouseButton1Click:Connect(function()
-jsonGui:Destroy()
-end)
+    for instance in pairs(scanned) do
+        table.insert(instances, instance)
+    end
 
-local textBox = Instance.new("TextBox")
-textBox.Size = UDim2.new(1, -20, 1, -55)
-textBox.Position = UDim2.fromOffset(10, 45)
+    jsonStatus.Text = string.format(
+        "Generating JSON... 0 / %d",
+        #instances
+    )
 
-textBox.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
-textBox.TextColor3 = Color3.fromRGB(220, 220, 220)
+    -- Export asynchronously so the click handler does not block the UI.
+    task.spawn(function()
+        local success, result = pcall(function()
+            local encodedEntries = {}
+            local total = #instances
 
-textBox.Text = json
-textBox.TextSize = 12
-textBox.Font = Enum.Font.Code
+            -- Build and encode each Instance independently.
+            -- This avoids creating one enormous Lua table and then
+            -- JSONEncode-ing the entire thing in one operation.
+            for i, instance in ipairs(instances) do
+                -- The Instance may have been destroyed since the scan.
+                if instance and instance.Parent then
+                    local attributes = {}
 
-textBox.TextXAlignment = Enum.TextXAlignment.Left
-textBox.TextYAlignment = Enum.TextYAlignment.Top
+                    local rawAttributes = getAttributes(instance)
 
-textBox.MultiLine = true
-textBox.ClearTextOnFocus = false
+                    for key, value in pairs(rawAttributes) do
+                        attributes[key] = serializeValue(value)
+                    end
 
-textBox.TextEditable = true
-textBox.BorderSizePixel = 0
+                    local entry = {
+                        name = instance.Name,
+                        className = instance.ClassName,
+                        path = getPath(instance),
+                        attributes = attributes
+                    }
 
-textBox.ZIndex = 31
-textBox.Parent = jsonGui
+                    -- Encode this entry individually.
+                    encodedEntries[i] = HttpService:JSONEncode(entry)
+                else
+                    -- Keep the array position valid.
+                    encodedEntries[i] = "null"
+                end
+
+                -- Yield periodically so the Roblox client can render
+                -- and process input while the export is running.
+                if i % JSON_YIELD_EVERY == 0 then
+                    jsonStatus.Text = string.format(
+                        "Generating JSON... %d / %d (%.1f%%)",
+                        i,
+                        total,
+                        total > 0 and (i / total) * 100 or 100
+                    )
+
+                    task.wait()
+                end
+            end
+
+            -- One final yield before assembling the finished string.
+            task.wait()
+
+            jsonStatus.Text = "Assembling JSON..."
+
+            -- Since every individual entry was already JSON encoded,
+            -- concatenating them avoids another huge JSONEncode call.
+            local json = "[" .. table.concat(encodedEntries, ",") .. "]"
+
+            return json
+        end)
+
+        -- The window may have been closed while the export was running.
+        if not jsonGui or not jsonGui.Parent then
+            return
+        end
+
+        if success then
+            jsonBox.Text = result
+            jsonStatus.Text = string.format(
+                "JSON export complete — %d Instances",
+                #instances
+            )
+        else
+            jsonBox.Text = "JSON export failed:\n\n" .. tostring(result)
+            jsonStatus.Text = "Export failed"
+        end
+    end)
 end
 
 ------------------------------------------------------------
