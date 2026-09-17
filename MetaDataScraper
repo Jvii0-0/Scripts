@@ -173,7 +173,7 @@ local function updateMobileLayout()
         detailsFrame.Size = UDim2.new(0.5, -15, 1, -105)
     else
         searchBox.Size = UDim2.new(0, 200, 0, 32)
-        searchBox.Position = UDim2.new(1, -215, 0, 5)
+        searchBox.Position = UDim2.new(1, -255, 0, 5)
         statusLabel.Visible = true
         treeFrame.Size = UDim2.new(0.52, -15, 1, -105)
         detailsFrame.Size = UDim2.new(0.48, -15, 1, -105)
@@ -221,7 +221,7 @@ titleLabel.Parent = titleBar
 local searchBox = Instance.new("TextBox")
 searchBox.Name = "Search"
 searchBox.Size = UDim2.new(0, 200, 0, 32)
-searchBox.Position = UDim2.new(1, -215, 0, 5)
+searchBox.Position = UDim2.new(1, -255, 0, 5)
 
 searchBox.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
 searchBox.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -238,6 +238,30 @@ searchBox.Parent = titleBar
 local searchCorner = Instance.new("UICorner")
 searchCorner.CornerRadius = UDim.new(0, 5)
 searchCorner.Parent = searchBox
+
+-- Close button: always visible inside the panel so mobile users can close it
+local closeButton = Instance.new("TextButton")
+closeButton.Name = "CloseButton"
+closeButton.Size = UDim2.fromOffset(35, 32)
+closeButton.Position = UDim2.new(1, -42, 0, 5)
+closeButton.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeButton.Text = "✕"
+closeButton.TextSize = 16
+closeButton.Font = Enum.Font.GothamBold
+closeButton.BorderSizePixel = 0
+closeButton.AutoButtonColor = true
+closeButton.ZIndex = 104
+closeButton.Parent = titleBar
+
+local closeCorner = Instance.new("UICorner")
+closeCorner.CornerRadius = UDim.new(0, 5)
+closeCorner.Parent = closeButton
+
+closeButton.MouseButton1Click:Connect(function()
+    mainFrame.Visible = false
+    toggleButton.Text = "🔎"
+end)
 
 ------------------------------------------------------------
 -- TOOLBAR
