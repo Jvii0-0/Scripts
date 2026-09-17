@@ -1013,19 +1013,23 @@ end
 
 local function getRequestFunction()
 
-    if syn and syn.request then
-        return syn.request
-    end
-
-    if http_request then
-        return http_request
-    end
-
-    if request then
+    if type(request) == "function" then
         return request
     end
 
-    if fluxus and fluxus.request then
+    if type(http_request) == "function" then
+        return http_request
+    end
+
+    if type(http) == "table" and type(http.request) == "function" then
+        return http.request
+    end
+
+    if type(syn) == "table" and type(syn.request) == "function" then
+        return syn.request
+    end
+
+    if type(fluxus) == "table" and type(fluxus.request) == "function" then
         return fluxus.request
     end
 
@@ -1105,11 +1109,14 @@ local function uploadJSONToDiscord(jsonData, fileName, recordCount)
     end)
 
     if not ok then
-        return false, tostring(response)
+        return false,
+            "HTTP request error: " ..
+            tostring(response)
     end
 
     if not response then
-        return false, "No response received from Discord."
+        return false,
+            "HTTP request returned no response."
     end
 
     local statusCode =
@@ -1129,9 +1136,9 @@ local function uploadJSONToDiscord(jsonData, fileName, recordCount)
         tostring(response)
 
     return false,
-        "Discord returned HTTP " ..
+        "Discord upload failed. HTTP " ..
         tostring(statusCode) ..
-        ": " ..
+        " | Response: " ..
         tostring(responseBody)
 end
 
