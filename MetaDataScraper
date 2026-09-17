@@ -578,7 +578,8 @@ treeScroll.BorderSizePixel = 0
 
 treeScroll.ScrollBarThickness = 6
 treeScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-treeScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+treeScroll.AutomaticCanvasSize = Enum.AutomaticSize.None
+treeScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 
 treeScroll.ZIndex = 102
 treeScroll.Parent = treeFrame
@@ -620,7 +621,8 @@ detailsScroll.BackgroundTransparency = 1
 detailsScroll.BorderSizePixel = 0
 
 detailsScroll.ScrollBarThickness = 6
-detailsScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+detailsScroll.AutomaticCanvasSize = Enum.AutomaticSize.None
+detailsScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 
 detailsScroll.ZIndex = 102
 detailsScroll.Parent = detailsFrame
@@ -629,6 +631,19 @@ local detailsLayout = Instance.new("UIListLayout")
 detailsLayout.SortOrder = Enum.SortOrder.LayoutOrder
 detailsLayout.Padding = UDim.new(0, 5)
 detailsLayout.Parent = detailsScroll
+
+local function bindScrollCanvas(scroll, layout, bottomPadding)
+    local function update()
+        local height = layout.AbsoluteContentSize.Y + (bottomPadding or 8)
+        scroll.CanvasSize = UDim2.new(0, 0, 0, height)
+    end
+    layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(update)
+    scroll:GetPropertyChangedSignal("AbsoluteSize"):Connect(update)
+    task.defer(update)
+end
+
+bindScrollCanvas(treeScroll, treeLayout, 10)
+bindScrollCanvas(detailsScroll, detailsLayout, 10)
 
 ------------------------------------------------------------
 -- HELPERS
@@ -1139,8 +1154,9 @@ function showCompare(a, b)
     local c=Instance.new("TextButton",f); c.Size=UDim2.fromOffset(32,30); c.Position=UDim2.new(1,-42,0,8); c.Text="X"; c.TextColor3=THEME.text; c.BackgroundColor3=THEME.surface; c.BorderSizePixel=0; c.ZIndex=28001; round(c,5); c.Activated:Connect(function() f:Destroy() end)
     local left=Instance.new("TextLabel",f); left.Size=UDim2.new(.45,-15,0,52); left.Position=UDim2.fromOffset(15,50); left.BackgroundColor3=THEME.panel2; left.Text=a.Name.."\n"..a.ClassName.."\n"..getPath(a); left.TextColor3=THEME.text; left.TextSize=12; left.Font=Enum.Font.Gotham; left.TextXAlignment=Enum.TextXAlignment.Left; left.TextWrapped=true; left.ZIndex=28001; round(left,6)
     local right=left:Clone(); right.Parent=f; right.Position=UDim2.new(.55,0,0,50); right.Text=b.Name.."\n"..b.ClassName.."\n"..getPath(b)
-    local scroll=Instance.new("ScrollingFrame",f); scroll.Size=UDim2.new(1,-30,1,-120); scroll.Position=UDim2.fromOffset(15,112); scroll.BackgroundTransparency=1; scroll.BorderSizePixel=0; scroll.ScrollBarThickness=5; scroll.AutomaticCanvasSize=Enum.AutomaticSize.Y; scroll.ZIndex=28001
+    local scroll=Instance.new("ScrollingFrame",f); scroll.Size=UDim2.new(1,-30,1,-120); scroll.Position=UDim2.fromOffset(15,112); scroll.BackgroundTransparency=1; scroll.BorderSizePixel=0; scroll.ScrollBarThickness=5; scroll.AutomaticCanvasSize=Enum.AutomaticSize.None; scroll.CanvasSize=UDim2.new(0,0,0,0); scroll.ZIndex=28001
     local layout=Instance.new("UIListLayout",scroll); layout.Padding=UDim.new(0,4)
+    layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function() scroll.CanvasSize=UDim2.new(0,0,0,layout.AbsoluteContentSize.Y+8) end)
     local pa=snapshotInstance(a); local pb=snapshotInstance(b); local keys={}
     for k in pairs(pa) do keys[k]=true end; for k in pairs(pb) do keys[k]=true end
     local list={}; for k in pairs(keys) do table.insert(list,k) end; table.sort(list)
@@ -1157,8 +1173,9 @@ function showHistory()
     local f=Instance.new("Frame",screenGui); f.Name="InspectorHistory"; f.Size=UDim2.fromOffset(430,430); f.Position=UDim2.new(.5,0,.5,0); f.AnchorPoint=Vector2.new(.5,.5); f.BackgroundColor3=THEME.bg; f.BorderSizePixel=0; f.ZIndex=27000; round(f,10); stroke(f,THEME.stroke,.05,1); gradient(f,90)
     local h=Instance.new("TextLabel",f); h.Size=UDim2.new(1,-60,0,40); h.Position=UDim2.fromOffset(15,8); h.BackgroundTransparency=1; h.Text="SELECTION & EXPORT HISTORY"; h.TextColor3=THEME.text; h.TextSize=16; h.Font=Enum.Font.GothamBold; h.TextXAlignment=Enum.TextXAlignment.Left; h.ZIndex=27001
     local c=Instance.new("TextButton",f); c.Size=UDim2.fromOffset(32,30); c.Position=UDim2.new(1,-42,0,8); c.Text="X"; c.TextColor3=THEME.text; c.BackgroundColor3=THEME.surface; c.BorderSizePixel=0; c.ZIndex=27001; round(c,5); c.Activated:Connect(function() f:Destroy() end)
-    local scroll=Instance.new("ScrollingFrame",f); scroll.Size=UDim2.new(1,-30,1,-62); scroll.Position=UDim2.fromOffset(15,52); scroll.BackgroundTransparency=1; scroll.BorderSizePixel=0; scroll.ScrollBarThickness=5; scroll.AutomaticCanvasSize=Enum.AutomaticSize.Y; scroll.ZIndex=27001
+    local scroll=Instance.new("ScrollingFrame",f); scroll.Size=UDim2.new(1,-30,1,-62); scroll.Position=UDim2.fromOffset(15,52); scroll.BackgroundTransparency=1; scroll.BorderSizePixel=0; scroll.ScrollBarThickness=5; scroll.AutomaticCanvasSize=Enum.AutomaticSize.None; scroll.CanvasSize=UDim2.new(0,0,0,0); scroll.ZIndex=27001
     local layout=Instance.new("UIListLayout",scroll); layout.Padding=UDim.new(0,5)
+    layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function() scroll.CanvasSize=UDim2.new(0,0,0,layout.AbsoluteContentSize.Y+8) end)
     local title=Instance.new("TextLabel",scroll); title.Size=UDim2.new(1,0,0,28); title.BackgroundTransparency=1; title.Text="RECENT SELECTIONS"; title.TextColor3=THEME.accent; title.Font=Enum.Font.GothamBold; title.TextSize=12; title.TextXAlignment=Enum.TextXAlignment.Left; title.ZIndex=27002
     for i,inst in ipairs(recentInstances) do
         if inst and inst.Parent then
@@ -1413,7 +1430,7 @@ local JSON_BATCH_SIZE = 25
 local JSON_PREVIEW_RECORDS = 25
 
 -- PUT YOUR WEBHOOK URL HERE
-local DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1550124148779384912/altEJPJIA5NNDFFn-g7ATiO85E6Do__0I-5VvnohV8O034_jXbHNA0qzvclTPAKU_XJn"
+local DISCORD_WEBHOOK_URL = "PUT_YOUR_NEW_WEBHOOK_HERE"
 
 local fullJSON = ""
 local jsonGenerating = false
@@ -2941,6 +2958,9 @@ local function showJSON()
         Color3.new(1, 1, 1)
 
     previewBox.TextSize = 13
+    previewBox.TextWrapped = false
+    previewBox.TextXAlignment = Enum.TextXAlignment.Left
+    previewBox.TextYAlignment = Enum.TextYAlignment.Top
 
     previewBox.Font =
         Enum.Font.Code
@@ -3308,59 +3328,210 @@ end
 -- STATS WINDOW
 --========================================================
 local function showStats()
-local existing = screenGui:FindFirstChild("InspectorStats")
-if existing then existing:Destroy() return end
-local f = Instance.new("Frame")
-f.Name = "InspectorStats"
-f.Size = UDim2.fromOffset(430, 390)
-f.Position = UDim2.new(0.5,0,0.5,0)
-f.AnchorPoint = Vector2.new(0.5,0.5)
-f.BackgroundColor3 = THEME.bg
-f.BorderSizePixel = 0
-f.ZIndex = 25000
-f.Parent = screenGui
-round(f,10); stroke(f,THEME.stroke,0.05,1.2); gradient(f,90)
-local h=Instance.new("TextLabel",f); h.Size=UDim2.new(1,-60,0,40); h.Position=UDim2.fromOffset(15,8); h.BackgroundTransparency=1; h.Text="EXPORT STATISTICS"; h.TextColor3=THEME.text; h.TextSize=17; h.Font=Enum.Font.GothamBold; h.TextXAlignment=Enum.TextXAlignment.Left; h.ZIndex=25001
-local c=Instance.new("TextButton",f); c.Size=UDim2.fromOffset(32,30); c.Position=UDim2.new(1,-42,0,8); c.Text="X"; c.TextColor3=THEME.text; c.BackgroundColor3=THEME.surface; c.BorderSizePixel=0; c.ZIndex=25001; round(c,5); c.Activated:Connect(function() f:Destroy() end)
-local scroll=Instance.new("ScrollingFrame",f); scroll.Size=UDim2.new(1,-30,1,-62); scroll.Position=UDim2.fromOffset(15,52); scroll.BackgroundTransparency=1; scroll.BorderSizePixel=0; scroll.ScrollBarThickness=5; scroll.AutomaticCanvasSize=Enum.AutomaticSize.Y; scroll.ZIndex=25001
-local layout=Instance.new("UIListLayout",scroll); layout.Padding=UDim.new(0,5)
-local function row(text)
- local l=Instance.new("TextLabel",scroll); l.Size=UDim2.new(1,0,0,30); l.BackgroundColor3=THEME.panel2; l.BorderSizePixel=0; l.Text=text; l.TextColor3=THEME.text; l.TextSize=13; l.Font=Enum.Font.Gotham; l.TextXAlignment=Enum.TextXAlignment.Left; l.ZIndex=25002; round(l,5); local pad=Instance.new("UIPadding",l); pad.PaddingLeft=UDim.new(0,10)
-end
-local classCounts={}; local totalAttrs=0; local totalTags=0; local maxDepth=0
-for inst in pairs(scanned) do
- classCounts[inst.ClassName]=(classCounts[inst.ClassName] or 0)+1
- totalAttrs += getAttributeCount(inst)
- local tags={}; pcall(function() tags=CollectionService:GetTags(inst) end); totalTags += #tags
- local depth=0; local cur=inst; while cur and cur~=game do depth+=1; cur=cur.Parent end; if depth>maxDepth then maxDepth=depth end
-end
-row("Instances: "..tostring(instanceCount)); row("Attributes: "..tostring(totalAttrs)); row("Tags: "..tostring(totalTags)); row("Max hierarchy depth: "..tostring(maxDepth)); row("Favorites: "..tostring((function() local n=0 for i in pairs(favorites) do if scanned[i] then n+=1 end end return n end)()))
-local names={}; for k in pairs(classCounts) do table.insert(names,k) end; table.sort(names,function(a,b) return classCounts[a]>classCounts[b] end)
-row("CLASS BREAKDOWN")
-for _,k in ipairs(names) do row(k.."  —  "..tostring(classCounts[k])) end
+    local existing = screenGui:FindFirstChild("InspectorStats")
+    if existing then existing:Destroy() return end
+
+    local camera = workspace.CurrentCamera
+    local vp = camera and camera.ViewportSize or Vector2.new(800, 600)
+    local w = math.clamp(math.floor(vp.X * 0.78), 300, 520)
+    local h = math.clamp(math.floor(vp.Y * 0.78), 280, 560)
+
+    local f = Instance.new("Frame")
+    f.Name = "InspectorStats"
+    f.Size = UDim2.fromOffset(w, h)
+    f.Position = UDim2.new(0.5, 0, 0.5, 0)
+    f.AnchorPoint = Vector2.new(0.5, 0.5)
+    f.BackgroundColor3 = THEME.bg
+    f.BorderSizePixel = 0
+    f.ZIndex = 25000
+    f.Parent = screenGui
+    round(f,10); stroke(f,THEME.stroke,0.05,1.2); gradient(f,90)
+
+    local hLabel = Instance.new("TextLabel")
+    hLabel.Size = UDim2.new(1,-70,0,34)
+    hLabel.Position = UDim2.fromOffset(15,8)
+    hLabel.BackgroundTransparency = 1
+    hLabel.Text = "EXPORT STATISTICS"
+    hLabel.TextColor3 = THEME.text
+    hLabel.TextSize = 16
+    hLabel.Font = Enum.Font.GothamBold
+    hLabel.TextXAlignment = Enum.TextXAlignment.Left
+    hLabel.ZIndex = 25001
+    hLabel.Parent = f
+
+    local sub = Instance.new("TextLabel")
+    sub.Size = UDim2.new(1,-70,0,18)
+    sub.Position = UDim2.fromOffset(15,34)
+    sub.BackgroundTransparency = 1
+    sub.Text = "Current scan overview"
+    sub.TextColor3 = THEME.muted
+    sub.TextSize = 10
+    sub.Font = Enum.Font.Gotham
+    sub.TextXAlignment = Enum.TextXAlignment.Left
+    sub.ZIndex = 25001
+    sub.Parent = f
+
+    local c=Instance.new("TextButton")
+    c.Size=UDim2.fromOffset(32,30)
+    c.Position=UDim2.new(1,-42,0,8)
+    c.Text="X"; c.TextColor3=THEME.text; c.BackgroundColor3=THEME.surface
+    c.BorderSizePixel=0; c.ZIndex=25001; c.Font=Enum.Font.GothamBold; c.TextSize=13
+    c.Parent=f; round(c,5)
+    c.Activated:Connect(function() f:Destroy() end)
+
+    local scroll=Instance.new("ScrollingFrame")
+    scroll.Name="StatsScroll"
+    scroll.Size=UDim2.new(1,-30,1,-64)
+    scroll.Position=UDim2.fromOffset(15,58)
+    scroll.BackgroundTransparency=1
+    scroll.BorderSizePixel=0
+    scroll.ScrollBarThickness=5
+    scroll.ScrollBarImageTransparency=0.15
+    scroll.AutomaticCanvasSize=Enum.AutomaticSize.None
+    scroll.CanvasSize=UDim2.new(0,0,0,0)
+    scroll.ZIndex=25001
+    scroll.Parent=f
+    local layout=Instance.new("UIListLayout",scroll)
+    layout.Padding=UDim.new(0,6)
+    layout.SortOrder=Enum.SortOrder.LayoutOrder
+
+    local function updateCanvas()
+        scroll.CanvasSize=UDim2.new(0,0,0,layout.AbsoluteContentSize.Y+8)
+    end
+    layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(updateCanvas)
+
+    local function row(text, height, accent)
+        local l=Instance.new("TextLabel")
+        l.Size=UDim2.new(1,-2,0,height or 32)
+        l.BackgroundColor3=accent and THEME.surface or THEME.panel2
+        l.BorderSizePixel=0
+        l.Text=text
+        l.TextColor3=accent and THEME.accent or THEME.text
+        l.TextSize=12
+        l.Font=accent and Enum.Font.GothamBold or Enum.Font.Gotham
+        l.TextXAlignment=Enum.TextXAlignment.Left
+        l.TextYAlignment=Enum.TextYAlignment.Center
+        l.TextTruncate=Enum.TextTruncate.AtEnd
+        l.ZIndex=25002
+        l.Parent=scroll
+        round(l,6)
+        local pad=Instance.new("UIPadding",l)
+        pad.PaddingLeft=UDim.new(0,10); pad.PaddingRight=UDim.new(0,8)
+        return l
+    end
+
+    local classCounts={}; local totalAttrs=0; local totalTags=0; local maxDepth=0
+    for inst in pairs(scanned) do
+        classCounts[inst.ClassName]=(classCounts[inst.ClassName] or 0)+1
+        totalAttrs += getAttributeCount(inst)
+        local tags={}; pcall(function() tags=CollectionService:GetTags(inst) end); totalTags += #tags
+        local depth=0; local cur=inst
+        while cur and cur~=game do depth+=1; cur=cur.Parent end
+        if depth>maxDepth then maxDepth=depth end
+    end
+
+    row("SCAN",28,true)
+    row("Instances:  "..tostring(instanceCount))
+    row("Attributes:  "..tostring(totalAttrs))
+    row("Tags:  "..tostring(totalTags))
+    row("Maximum hierarchy depth:  "..tostring(maxDepth))
+    local fav=0; for i in pairs(favorites) do if scanned[i] then fav+=1 end end
+    row("Favorites:  "..tostring(fav))
+    row("CLASS BREAKDOWN",28,true)
+
+    local names={}; for k in pairs(classCounts) do table.insert(names,k) end
+    table.sort(names,function(a,b) return classCounts[a]>classCounts[b] end)
+    for _,k in ipairs(names) do row(string.format("%-28s %d",k,classCounts[k]),30) end
+    task.defer(updateCanvas)
 end
 
 --========================================================
 -- CLASS FILTER
 --========================================================
 local function showClassFilter()
-local existing=screenGui:FindFirstChild("InspectorClassFilter")
-if existing then existing:Destroy() return end
-local f=Instance.new("Frame",screenGui); f.Name="InspectorClassFilter"; f.Size=UDim2.fromOffset(300,360); f.Position=UDim2.new(0.5,0,0.5,0); f.AnchorPoint=Vector2.new(.5,.5); f.BackgroundColor3=THEME.bg; f.BorderSizePixel=0; f.ZIndex=26000; round(f,9); stroke(f,THEME.stroke,.1,1)
-local title=Instance.new("TextLabel",f); title.Size=UDim2.new(1,-50,0,38); title.Position=UDim2.fromOffset(12,5); title.BackgroundTransparency=1; title.Text="CLASS FILTER"; title.TextColor3=THEME.text; title.TextSize=16; title.Font=Enum.Font.GothamBold; title.TextXAlignment=Enum.TextXAlignment.Left; title.ZIndex=26001
-local close=Instance.new("TextButton",f); close.Size=UDim2.fromOffset(30,28); close.Position=UDim2.new(1,-40,0,8); close.Text="X"; close.BackgroundColor3=THEME.surface; close.TextColor3=THEME.text; close.BorderSizePixel=0; close.ZIndex=26001; round(close,5); close.Activated:Connect(function() f:Destroy() end)
-local input=Instance.new("TextBox",f); input.Size=UDim2.new(1,-24,0,30); input.Position=UDim2.fromOffset(12,45); input.PlaceholderText="Filter classes..."; input.Text=""; input.TextColor3=THEME.text; input.PlaceholderColor3=THEME.muted; input.BackgroundColor3=THEME.surface; input.BorderSizePixel=0; input.ZIndex=26001; round(input,5)
-local clear=Instance.new("TextButton",f); clear.Size=UDim2.new(1,-24,0,28); clear.Position=UDim2.fromOffset(12,80); clear.Text="All classes"; clear.TextColor3=THEME.text; clear.BackgroundColor3=THEME.accentSoft; clear.BorderSizePixel=0; clear.ZIndex=26001; round(clear,5)
-clear.Activated:Connect(function() classFilter=""; searchCacheQuery=nil; rebuildTree(); f:Destroy(); showToast("Class filter cleared", "success") end)
-local scroll=Instance.new("ScrollingFrame",f); scroll.Size=UDim2.new(1,-24,1,-118); scroll.Position=UDim2.fromOffset(12,115); scroll.BackgroundTransparency=1; scroll.BorderSizePixel=0; scroll.ScrollBarThickness=5; scroll.ZIndex=26001
-local lay=Instance.new("UIListLayout",scroll); lay.Padding=UDim.new(0,3)
-local classes={}; for inst in pairs(scanned) do classes[inst.ClassName]=true end; local list={}; for k in pairs(classes) do table.insert(list,k) end; table.sort(list)
-local function refreshList()
- for _,ch in ipairs(scroll:GetChildren()) do if not ch:IsA("UIListLayout") then ch:Destroy() end end
- local q=string.lower(input.Text)
- for _,cls in ipairs(list) do if q=="" or string.find(string.lower(cls),q,1,true) then local b=Instance.new("TextButton",scroll); b.Size=UDim2.new(1,-4,0,28); b.Text=cls; b.TextColor3=THEME.text; b.BackgroundColor3=(string.lower(classFilter)==string.lower(cls) and THEME.accentSoft or THEME.surface); b.BorderSizePixel=0; b.ZIndex=26002; round(b,5); b.Activated:Connect(function() classFilter=cls; searchCacheQuery=nil; rebuildTree(); f:Destroy(); showToast("Class filter: " .. cls, "success") end) end end
-end
-input:GetPropertyChangedSignal("Text"):Connect(refreshList); refreshList()
+    local existing=screenGui:FindFirstChild("InspectorClassFilter")
+    if existing then existing:Destroy() return end
+
+    local camera=workspace.CurrentCamera
+    local vp=camera and camera.ViewportSize or Vector2.new(800,600)
+    local w=math.clamp(math.floor(vp.X*0.62),280,420)
+    local h=math.clamp(math.floor(vp.Y*0.72),300,500)
+
+    local f=Instance.new("Frame",screenGui)
+    f.Name="InspectorClassFilter"; f.Size=UDim2.fromOffset(w,h)
+    f.Position=UDim2.new(.5,0,.5,0); f.AnchorPoint=Vector2.new(.5,.5)
+    f.BackgroundColor3=THEME.bg; f.BorderSizePixel=0; f.ZIndex=26000
+    round(f,9); stroke(f,THEME.stroke,.05,1); gradient(f,90)
+
+    local title=Instance.new("TextLabel",f)
+    title.Size=UDim2.new(1,-60,0,32); title.Position=UDim2.fromOffset(12,8)
+    title.BackgroundTransparency=1; title.Text="CLASS FILTER"; title.TextColor3=THEME.text
+    title.TextSize=16; title.Font=Enum.Font.GothamBold; title.TextXAlignment=Enum.TextXAlignment.Left; title.ZIndex=26001
+
+    local close=Instance.new("TextButton",f)
+    close.Size=UDim2.fromOffset(30,28); close.Position=UDim2.new(1,-40,0,8)
+    close.Text="X"; close.BackgroundColor3=THEME.surface; close.TextColor3=THEME.text
+    close.BorderSizePixel=0; close.ZIndex=26001; close.Font=Enum.Font.GothamBold; close.TextSize=13; round(close,5)
+    close.Activated:Connect(function() f:Destroy() end)
+
+    local input=Instance.new("TextBox",f)
+    input.Size=UDim2.new(1,-24,0,32); input.Position=UDim2.fromOffset(12,46)
+    input.PlaceholderText="Filter classes..."; input.Text=""; input.TextColor3=THEME.text
+    input.PlaceholderColor3=THEME.muted; input.BackgroundColor3=THEME.surface; input.BorderSizePixel=0
+    input.ClearTextOnFocus=false; input.TextSize=12; input.Font=Enum.Font.Gotham; input.ZIndex=26001; round(input,5)
+    local ip=Instance.new("UIPadding",input); ip.PaddingLeft=UDim.new(0,9); ip.PaddingRight=UDim.new(0,9)
+
+    local clear=Instance.new("TextButton",f)
+    clear.Size=UDim2.new(1,-24,0,30); clear.Position=UDim2.fromOffset(12,84)
+    clear.Text="All classes"; clear.TextColor3=THEME.text; clear.BackgroundColor3=THEME.accentSoft
+    clear.BorderSizePixel=0; clear.ZIndex=26001; clear.Font=Enum.Font.GothamMedium; clear.TextSize=12; round(clear,5)
+    clear.Activated:Connect(function() classFilter=""; searchCacheQuery=nil; rebuildTree(); f:Destroy(); showToast("Class filter cleared","success") end)
+
+    local countLabel=Instance.new("TextLabel",f)
+    countLabel.Size=UDim2.new(1,-24,0,20); countLabel.Position=UDim2.fromOffset(12,118)
+    countLabel.BackgroundTransparency=1; countLabel.TextColor3=THEME.muted; countLabel.TextSize=10
+    countLabel.Font=Enum.Font.Gotham; countLabel.TextXAlignment=Enum.TextXAlignment.Left; countLabel.ZIndex=26001
+
+    local scroll=Instance.new("ScrollingFrame",f)
+    scroll.Size=UDim2.new(1,-24,1,-150); scroll.Position=UDim2.fromOffset(12,142)
+    scroll.BackgroundTransparency=1; scroll.BorderSizePixel=0; scroll.ScrollBarThickness=5
+    scroll.ScrollBarImageTransparency=0.15; scroll.AutomaticCanvasSize=Enum.AutomaticSize.None
+    scroll.CanvasSize=UDim2.new(0,0,0,0); scroll.ZIndex=26001
+    local lay=Instance.new("UIListLayout",scroll); lay.Padding=UDim.new(0,4); lay.SortOrder=Enum.SortOrder.LayoutOrder
+    lay:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        scroll.CanvasSize=UDim2.new(0,0,0,lay.AbsoluteContentSize.Y+8)
+    end)
+
+    local classes={}; for inst in pairs(scanned) do classes[inst.ClassName]=true end
+    local list={}; for k in pairs(classes) do table.insert(list,k) end; table.sort(list)
+
+    local function refreshList()
+        local oldY=scroll.CanvasPosition.Y
+        for _,ch in ipairs(scroll:GetChildren()) do if not ch:IsA("UIListLayout") then ch:Destroy() end end
+        local q=string.lower(input.Text or "")
+        local shown=0
+        for _,cls in ipairs(list) do
+            if q=="" or string.find(string.lower(cls),q,1,true) then
+                shown+=1
+                local b=Instance.new("TextButton",scroll)
+                b.Size=UDim2.new(1,-4,0,30); b.Text=cls; b.TextColor3=THEME.text
+                b.TextXAlignment=Enum.TextXAlignment.Left; b.BackgroundColor3=(string.lower(classFilter)==string.lower(cls) and THEME.accentSoft or THEME.surface)
+                b.BorderSizePixel=0; b.ZIndex=26002; b.Font=Enum.Font.Gotham; b.TextSize=12; round(b,5)
+                local pad=Instance.new("UIPadding",b); pad.PaddingLeft=UDim.new(0,9); pad.PaddingRight=UDim.new(0,8)
+                b.Activated:Connect(function()
+                    classFilter=cls; searchCacheQuery=nil; rebuildTree(); f:Destroy()
+                    showToast("Class filter: " .. cls, "success")
+                end)
+            end
+        end
+        countLabel.Text=tostring(shown).." class"..(shown==1 and "" or "es")
+        task.defer(function()
+            local maxY=math.max(0,lay.AbsoluteContentSize.Y-scroll.AbsoluteWindowSize.Y)
+            scroll.CanvasPosition=Vector2.new(0,math.clamp(oldY,0,maxY))
+        end)
+    end
+    input:GetPropertyChangedSignal("Text"):Connect(refreshList)
+    refreshList()
 end
 
 -- EXPAND / COLLAPSE
@@ -3639,118 +3810,99 @@ end)
 ------------------------------------------------------------
 
 local function updateMobileLayout()
-local camera = workspace.CurrentCamera
-if not camera then
-return
-end
+    local camera = workspace.CurrentCamera
+    if not camera then return end
+    local viewport = camera.ViewportSize
+    local w,h = viewport.X, viewport.Y
+    local compact = w <= 760
+    local phone = w <= 600
 
-local viewport = camera.ViewportSize
-local isMobile = viewport.X <= 600
+    mainFrame.Size = UDim2.fromScale(phone and 0.94 or 0.92, phone and 0.90 or 0.86)
+    mainFrame.Position = UDim2.fromScale(0.5,0.5)
+    mainFrame.AnchorPoint = Vector2.new(0.5,0.5)
 
-if isMobile then
-mainFrame.Size = UDim2.new(0.94, 0, 0.88, 0)
-mainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
-mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+    titleBar.Size = UDim2.new(1,0,0, phone and 48 or 50)
+    titleLabel.Position = UDim2.fromOffset(14,6)
+    titleLabel.Size = UDim2.new(compact and 0.42 or 0.45,0,0,22)
+    titleLabel.TextSize = phone and 14 or 17
+    subtitleLabel.Position = UDim2.fromOffset(14,27)
+    subtitleLabel.TextSize = phone and 8 or 9
+    liveBadge.Visible = not phone
+    closeButton.Size = UDim2.fromOffset(phone and 30 or 34,30)
+    closeButton.Position = UDim2.new(1, -(phone and 36 or 39), 0, 8)
 
-titleLabel.Size = UDim2.new(0.40, 0, 0, 22)
-titleLabel.TextSize = 13
-searchBox.Size = UDim2.new(0.32, 0, 0, 30)
-searchBox.Position = UDim2.new(0.43, 0, 0, 8)
-searchBox.TextSize = 11
+    searchBox.Size = UDim2.new(phone and 0.42 or (compact and 0.34 or 0.30),0,0, phone and 30 or 34)
+    searchBox.Position = UDim2.new(phone and 0.50 or (compact and 0.53 or 0.54),0,0, phone and 9 or 8)
+    searchBox.TextSize = phone and 10 or 12
 
-toolbar.Size = UDim2.new(1, -20, 0, 114)
-statusLabel.Visible = false
-statusBar.Size = UDim2.new(1, -20, 0, 26)
-statusBar.Position = UDim2.new(0, 10, 1, -34)
-statusCountLabel.Visible = false
+    local top = phone and 56 or 58
+    local toolbarHeight
+    if phone then toolbarHeight=76 elseif compact then toolbarHeight=76 else toolbarHeight=38 end
+    toolbar.Size=UDim2.new(1,-20,0,toolbarHeight)
+    toolbar.Position=UDim2.fromOffset(10,top)
 
--- Compact four-button mobile toolbar
-local mobileButtonWidth = math.floor((math.max(260, viewport.X * 0.94) - 55) / 6)
-rescanButton.Size = UDim2.fromOffset(mobileButtonWidth, 32)
-expandButton.Size = UDim2.fromOffset(mobileButtonWidth, 32)
-collapseButton.Size = UDim2.fromOffset(mobileButtonWidth, 32)
-jsonButton.Size = UDim2.fromOffset(mobileButtonWidth, 32)
-statsButton.Size = UDim2.fromOffset(mobileButtonWidth, 32)
-filterButton.Size = UDim2.fromOffset(mobileButtonWidth, 32)
-backButton.Size = UDim2.fromOffset(mobileButtonWidth, 32)
-forwardButton.Size = UDim2.fromOffset(mobileButtonWidth, 32)
-compareButton.Size = UDim2.fromOffset(mobileButtonWidth, 32)
-historyButton.Size = UDim2.fromOffset(mobileButtonWidth, 32)
-rescanButton.Position = UDim2.fromOffset(0, 0)
-expandButton.Position = UDim2.fromOffset(mobileButtonWidth + 5, 0)
-collapseButton.Position = UDim2.fromOffset((mobileButtonWidth + 5) * 2, 0)
-jsonButton.Position = UDim2.fromOffset((mobileButtonWidth + 5) * 3, 0)
-statsButton.Position = UDim2.fromOffset((mobileButtonWidth + 5) * 4, 0)
-filterButton.Position = UDim2.fromOffset((mobileButtonWidth + 5) * 5, 0)
-backButton.Position = UDim2.fromOffset(0, 38)
-forwardButton.Position = UDim2.fromOffset(mobileButtonWidth + 5, 38)
-compareButton.Position = UDim2.fromOffset((mobileButtonWidth + 5) * 2, 38)
-historyButton.Position = UDim2.fromOffset((mobileButtonWidth + 5) * 3, 38)
-rescanButton.Text = "Rescan"
-expandButton.Text = "Expand"
-collapseButton.Text = "Collapse"
-jsonButton.Text = "JSON"
-statsButton.Text = "Stats"
-filterButton.Text = "Class"
+    local buttons={rescanButton,expandButton,collapseButton,jsonButton,statsButton,filterButton,backButton,forwardButton,compareButton,historyButton}
+    local labels={"Rescan","Expand","Collapse","JSON","Stats","Class","‹","›","Compare","History"}
+    local gap=5
+    if phone then
+        local bw=math.max(48, math.floor((math.min(w*0.94, 520)-30-gap*4)/5))
+        for i,b in ipairs(buttons) do
+            b.Size=UDim2.fromOffset(bw,30)
+            local row=i<=5 and 0 or 1
+            local col=(i-1)%5
+            b.Position=UDim2.fromOffset(col*(bw+gap), row*35)
+            b.Text=labels[i]
+            b.TextSize=10
+        end
+        statusLabel.Visible=false
+        statusCountLabel.Visible=false
+    elseif compact then
+        local bw=math.max(58, math.floor((math.min(w*0.92, 680)-45)/6))
+        for i,b in ipairs(buttons) do
+            b.Size=UDim2.fromOffset(bw,30)
+            local row=i<=6 and 0 or 1
+            local col=(i-1)%6
+            b.Position=UDim2.fromOffset(col*(bw+gap), row*35)
+            b.Text=labels[i]
+            b.TextSize=10
+        end
+        statusLabel.Visible=false
+        statusCountLabel.Visible=true
+    else
+        local specs={{80,"Rescan"},{90,"Expand All"},{100,"Collapse All"},{70,"JSON"},{70,"Stats"},{70,"Class"},{34,"‹"},{34,"›"},{72,"Compare"},{72,"History"}}
+        local x=0
+        for i,b in ipairs(buttons) do
+            local bw=specs[i][1]
+            b.Size=UDim2.fromOffset(bw,32); b.Position=UDim2.fromOffset(x,0); b.Text=specs[i][2]; b.TextSize=12; x+=bw+8
+        end
+        statusLabel.Visible=true
+        statusLabel.Size=UDim2.new(1,-math.min(x+8,math.floor(w*0.55)),0,32)
+        statusLabel.Position=UDim2.fromOffset(math.min(x+8,math.floor(w*0.55)),0)
+        statusCountLabel.Visible=true
+    end
 
-treeFrame.Size = UDim2.new(1, -20, 0.41, 0)
-treeFrame.Position = UDim2.new(0, 10, 0, 146)
-
-detailsFrame.Size = UDim2.new(1, -20, 0.41, 0)
-detailsFrame.Position = UDim2.new(0, 10, 0.53, 0)
-else
-mainFrame.Size = UDim2.new(0.94, 0, 0.88, 0)
-mainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
-mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-
-titleLabel.Size = UDim2.new(0.42, 0, 1, 0)
-titleLabel.TextSize = 17
-searchBox.Size = UDim2.new(0.30, 0, 0, 34)
-searchBox.Position = UDim2.new(0.54, 0, 0, 8)
-searchBox.TextSize = 13
-
-toolbar.Size = UDim2.new(1, -20, 0, 38)
-statusLabel.Visible = true
-statusLabel.Size = UDim2.new(1, -790, 0, 32)
-statusLabel.Position = UDim2.fromOffset(780, 0)
-statusBar.Size = UDim2.new(1, -20, 0, 28)
-statusBar.Position = UDim2.new(0, 10, 1, -38)
-statusCountLabel.Visible = true
-
--- Restore desktop toolbar sizing
-rescanButton.Size = UDim2.fromOffset(80, 32)
-expandButton.Size = UDim2.fromOffset(90, 32)
-collapseButton.Size = UDim2.fromOffset(100, 32)
-jsonButton.Size = UDim2.fromOffset(70, 32)
-statsButton.Size = UDim2.fromOffset(70, 32)
-filterButton.Size = UDim2.fromOffset(70, 32)
-rescanButton.Position = UDim2.fromOffset(0, 0)
-expandButton.Position = UDim2.fromOffset(90, 0)
-collapseButton.Position = UDim2.fromOffset(190, 0)
-jsonButton.Position = UDim2.fromOffset(300, 0)
-statsButton.Position = UDim2.fromOffset(380, 0)
-filterButton.Position = UDim2.fromOffset(460, 0)
-backButton.Size = UDim2.fromOffset(34, 32)
-forwardButton.Size = UDim2.fromOffset(34, 32)
-compareButton.Size = UDim2.fromOffset(72, 32)
-historyButton.Size = UDim2.fromOffset(72, 32)
-backButton.Position = UDim2.fromOffset(540, 0)
-forwardButton.Position = UDim2.fromOffset(580, 0)
-compareButton.Position = UDim2.fromOffset(620, 0)
-historyButton.Position = UDim2.fromOffset(700, 0)
-rescanButton.Text = "Rescan"
-expandButton.Text = "Expand All"
-collapseButton.Text = "Collapse All"
-jsonButton.Text = "JSON"
-statsButton.Text = "Stats"
-filterButton.Text = "Class"
-
-treeFrame.Size = UDim2.new(0.52, -15, 1, -140)
-treeFrame.Position = UDim2.fromOffset(10, 101)
-
-detailsFrame.Size = UDim2.new(0.48, -15, 1, -140)
-detailsFrame.Position = UDim2.new(0.52, 5, 0, 101)
-end
+    local contentTop=top+toolbarHeight+8
+    local footerH=34
+    if phone then
+        -- Stack the panels using absolute geometry so the second panel never
+        -- drifts outside the window on short phone screens.
+        local frameH = mainFrame.AbsoluteSize.Y
+        local available = math.max(260, frameH - contentTop - footerH - 10)
+        local panelGap = 8
+        local panelH = math.max(110, math.floor((available - panelGap) / 2))
+        treeFrame.Size=UDim2.new(1,-20,0,panelH)
+        treeFrame.Position=UDim2.fromOffset(10,contentTop)
+        detailsFrame.Size=UDim2.new(1,-20,0,panelH)
+        detailsFrame.Position=UDim2.fromOffset(10,contentTop + panelH + panelGap)
+    else
+        treeFrame.Size=UDim2.new(0.52,-15,1,-contentTop-footerH-8)
+        treeFrame.Position=UDim2.fromOffset(10,contentTop)
+        detailsFrame.Size=UDim2.new(0.48,-15,1,-contentTop-footerH-8)
+        detailsFrame.Position=UDim2.new(0.52,5,0,contentTop)
+    end
+    statusBar.Size=UDim2.new(1,-20,0,28)
+    statusBar.Position=UDim2.new(0,10,1,-34)
+    refreshStatusCounts()
 end
 
 updateMobileLayout()
