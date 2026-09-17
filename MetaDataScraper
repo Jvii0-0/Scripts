@@ -3562,7 +3562,7 @@ end
 
 
 --========================================================
--- CLASS FILTER
+-- COMPACT CLASS FILTER
 --========================================================
 local function showClassFilter()
     local existing=screenGui:FindFirstChild("InspectorClassFilter")
@@ -3570,83 +3570,113 @@ local function showClassFilter()
 
     local camera=workspace.CurrentCamera
     local vp=camera and camera.ViewportSize or Vector2.new(800,600)
-    local w=math.max(220, math.min(420, vp.X-16))
-    local h=math.max(240, math.min(560, vp.Y-16))
+    local w=math.max(230, math.min(320, vp.X-20))
+    local h=math.max(210, math.min(440, vp.Y-90))
 
     local f=Instance.new("Frame",screenGui)
-    f.Name="InspectorClassFilter"; f.Size=UDim2.fromOffset(w,h)
-    f.Position=UDim2.new(.5,0,.5,0); f.AnchorPoint=Vector2.new(.5,.5)
+    f.Name="InspectorClassFilter"
+    f.Size=UDim2.fromOffset(w,h)
+    f.AnchorPoint=Vector2.new(1,0)
+    f.Position=UDim2.new(1,-12,0,86)
     f.BackgroundColor3=THEME.bg; f.BorderSizePixel=0; f.ZIndex=26000
-    round(f,9); stroke(f,THEME.stroke,.05,1); gradient(f,90)
+    f.ClipsDescendants=true
+    round(f,8); stroke(f,THEME.stroke,.05,1); gradient(f,90)
 
     local title=Instance.new("TextLabel",f)
-    title.Size=UDim2.new(1,-60,0,32); title.Position=UDim2.fromOffset(12,8)
+    title.Size=UDim2.new(1,-48,0,28); title.Position=UDim2.fromOffset(10,7)
     title.BackgroundTransparency=1; title.Text="CLASS FILTER"; title.TextColor3=THEME.text
-    title.TextSize=16; title.Font=Enum.Font.GothamBold; title.TextXAlignment=Enum.TextXAlignment.Left; title.ZIndex=26001
+    title.TextSize=13; title.Font=Enum.Font.GothamBold; title.TextXAlignment=Enum.TextXAlignment.Left; title.ZIndex=26001
 
     local close=Instance.new("TextButton",f)
-    close.Size=UDim2.fromOffset(30,28); close.Position=UDim2.new(1,-40,0,8)
+    close.Size=UDim2.fromOffset(26,26); close.Position=UDim2.new(1,-34,0,7)
     close.Text="X"; close.BackgroundColor3=THEME.surface; close.TextColor3=THEME.text
-    close.BorderSizePixel=0; close.ZIndex=26001; close.Font=Enum.Font.GothamBold; close.TextSize=13; round(close,5)
+    close.BorderSizePixel=0; close.ZIndex=26001; close.Font=Enum.Font.GothamBold; close.TextSize=11; round(close,5)
     close.Activated:Connect(function() f:Destroy() end)
 
     local input=Instance.new("TextBox",f)
-    input.Size=UDim2.new(1,-24,0,32); input.Position=UDim2.fromOffset(12,46)
-    input.PlaceholderText="Filter classes..."; input.Text=""; input.TextColor3=THEME.text
+    input.Size=UDim2.new(1,-20,0,30); input.Position=UDim2.fromOffset(10,40)
+    input.PlaceholderText="Search classes..."; input.Text=""; input.TextColor3=THEME.text
     input.PlaceholderColor3=THEME.muted; input.BackgroundColor3=THEME.surface; input.BorderSizePixel=0
-    input.ClearTextOnFocus=false; input.TextSize=12; input.Font=Enum.Font.Gotham; input.ZIndex=26001; round(input,5)
-    local ip=Instance.new("UIPadding",input); ip.PaddingLeft=UDim.new(0,9); ip.PaddingRight=UDim.new(0,9)
+    input.ClearTextOnFocus=false; input.TextSize=11; input.Font=Enum.Font.Gotham; input.ZIndex=26001; round(input,5)
+    local ip=Instance.new("UIPadding",input); ip.PaddingLeft=UDim.new(0,8); ip.PaddingRight=UDim.new(0,8)
+
+    local current=Instance.new("TextLabel",f)
+    current.Size=UDim2.new(1,-20,0,22); current.Position=UDim2.fromOffset(10,76)
+    current.BackgroundTransparency=1; current.TextColor3=THEME.muted; current.TextSize=10
+    current.Font=Enum.Font.Gotham; current.TextXAlignment=Enum.TextXAlignment.Left; current.ZIndex=26001
+    current.Text="Current: "..(classFilter ~= "" and classFilter or "All classes")
 
     local clear=Instance.new("TextButton",f)
-    clear.Size=UDim2.new(1,-24,0,30); clear.Position=UDim2.fromOffset(12,84)
+    clear.Size=UDim2.new(1,-20,0,28); clear.Position=UDim2.fromOffset(10,100)
     clear.Text="All classes"; clear.TextColor3=THEME.text; clear.BackgroundColor3=THEME.accentSoft
-    clear.BorderSizePixel=0; clear.ZIndex=26001; clear.Font=Enum.Font.GothamMedium; clear.TextSize=12; round(clear,5)
-    clear.Activated:Connect(function() classFilter=""; searchCacheQuery=nil; rebuildTree(); f:Destroy(); end)
-
-    local countLabel=Instance.new("TextLabel",f)
-    countLabel.Size=UDim2.new(1,-24,0,20); countLabel.Position=UDim2.fromOffset(12,118)
-    countLabel.BackgroundTransparency=1; countLabel.TextColor3=THEME.muted; countLabel.TextSize=10
-    countLabel.Font=Enum.Font.Gotham; countLabel.TextXAlignment=Enum.TextXAlignment.Left; countLabel.ZIndex=26001
-
-    local scroll=Instance.new("ScrollingFrame",f)
-    scroll.Size=UDim2.new(1,-24,1,-150); scroll.Position=UDim2.fromOffset(12,142)
-    scroll.BackgroundTransparency=1; scroll.BorderSizePixel=0; scroll.ScrollBarThickness=5
-    scroll.ScrollBarImageTransparency=0.15; scroll.AutomaticCanvasSize=Enum.AutomaticSize.None
-    scroll.CanvasSize=UDim2.new(0,0,0,0); scroll.ZIndex=26001
-    local scrollPad=Instance.new("UIPadding",scroll); scrollPad.PaddingBottom=UDim.new(0,12); scrollPad.PaddingRight=UDim.new(0,4)
-    local lay=Instance.new("UIListLayout",scroll); lay.Padding=UDim.new(0,4); lay.SortOrder=Enum.SortOrder.LayoutOrder
-    lay:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-        scroll.CanvasSize=UDim2.new(0,0,0,lay.AbsoluteContentSize.Y+14)
+    clear.BorderSizePixel=0; clear.ZIndex=26001; clear.Font=Enum.Font.GothamMedium; clear.TextSize=11; round(clear,5)
+    clear.Activated:Connect(function()
+        classFilter=""
+        searchCacheQuery=nil
+        rebuildTree()
+        f:Destroy()
+        setMainStatus("Class filter cleared", "ready")
     end)
 
-    local classes={}; for inst in pairs(scanned) do classes[inst.ClassName]=true end
-    local list={}; for k in pairs(classes) do table.insert(list,k) end; table.sort(list)
+    local scroll=Instance.new("ScrollingFrame",f)
+    scroll.Size=UDim2.new(1,-20,1,-138); scroll.Position=UDim2.fromOffset(10,134)
+    scroll.BackgroundTransparency=1; scroll.BorderSizePixel=0; scroll.ScrollBarThickness=4
+    scroll.ScrollBarImageTransparency=0.15; scroll.AutomaticCanvasSize=Enum.AutomaticSize.None
+    scroll.CanvasSize=UDim2.new(0,0,0,0); scroll.ZIndex=26001
+    local scrollPad=Instance.new("UIPadding",scroll); scrollPad.PaddingBottom=UDim.new(0,8); scrollPad.PaddingRight=UDim.new(0,3)
+    local lay=Instance.new("UIListLayout",scroll); lay.Padding=UDim.new(0,3); lay.SortOrder=Enum.SortOrder.LayoutOrder
+    lay:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        scroll.CanvasSize=UDim2.new(0,0,0,lay.AbsoluteContentSize.Y+10)
+    end)
+
+    local classes={}
+    for inst,data in pairs(scanned) do
+        local cls=(data and data.className) or inst.ClassName
+        classes[cls]=true
+    end
+    local list={}
+    for k in pairs(classes) do table.insert(list,k) end
+    table.sort(list)
+
+    local function applyClass(cls)
+        classFilter=cls
+        searchCacheQuery=nil
+        rebuildTree()
+        f:Destroy()
+        setMainStatus("Class: "..cls, "ready")
+    end
 
     local function refreshList()
         local oldY=scroll.CanvasPosition.Y
-        for _,ch in ipairs(scroll:GetChildren()) do if not ch:IsA("UIListLayout") then ch:Destroy() end end
+        for _,ch in ipairs(scroll:GetChildren()) do
+            if not ch:IsA("UIListLayout") and not ch:IsA("UIPadding") then ch:Destroy() end
+        end
         local q=string.lower(input.Text or "")
         local shown=0
         for _,cls in ipairs(list) do
             if q=="" or string.find(string.lower(cls),q,1,true) then
                 shown+=1
                 local b=Instance.new("TextButton",scroll)
-                b.Size=UDim2.new(1,-4,0,30); b.Text=cls; b.TextColor3=THEME.text
-                b.TextXAlignment=Enum.TextXAlignment.Left; b.BackgroundColor3=(string.lower(classFilter)==string.lower(cls) and THEME.accentSoft or THEME.surface)
-                b.BorderSizePixel=0; b.ZIndex=26002; b.Font=Enum.Font.Gotham; b.TextSize=12; round(b,5)
-                local pad=Instance.new("UIPadding",b); pad.PaddingLeft=UDim.new(0,9); pad.PaddingRight=UDim.new(0,8)
-                b.Activated:Connect(function()
-                    classFilter=cls; searchCacheQuery=nil; rebuildTree(); f:Destroy()
-                    
-                end)
+                b.Size=UDim2.new(1,-3,0,27); b.Text=cls; b.TextColor3=THEME.text
+                b.TextXAlignment=Enum.TextXAlignment.Left
+                b.BackgroundColor3=(string.lower(classFilter)==string.lower(cls) and THEME.accentSoft or THEME.surface)
+                b.BorderSizePixel=0; b.ZIndex=26002; b.Font=Enum.Font.Gotham; b.TextSize=11; round(b,5)
+                local pad=Instance.new("UIPadding",b); pad.PaddingLeft=UDim.new(0,8); pad.PaddingRight=UDim.new(0,6)
+                b.Activated:Connect(function() applyClass(cls) end)
             end
         end
-        countLabel.Text=tostring(shown).." class"..(shown==1 and "" or "es")
+        if shown==0 then
+            local empty=Instance.new("TextLabel",scroll)
+            empty.Size=UDim2.new(1,-3,0,28); empty.BackgroundTransparency=1
+            empty.Text="No matching classes"; empty.TextColor3=THEME.muted
+            empty.TextSize=10; empty.Font=Enum.Font.Gotham; empty.ZIndex=26002
+        end
         task.defer(function()
             local maxY=math.max(0,lay.AbsoluteContentSize.Y-scroll.AbsoluteWindowSize.Y)
             scroll.CanvasPosition=Vector2.new(0,math.clamp(oldY,0,maxY))
         end)
     end
+
     input:GetPropertyChangedSignal("Text"):Connect(refreshList)
     refreshList()
 end
