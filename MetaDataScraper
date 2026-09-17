@@ -1719,7 +1719,15 @@ local function collectRelevantProperties(instance)
     return properties
 end
 
-local function buildJSONAsync(updateStatus, selectedOnly)
+local function buildJSONAsync(updateStatus, selectedOnly, exportOptions)
+
+    exportOptions = exportOptions or {}
+    local includeChildren = exportOptions.includeChildren ~= false
+    local includeAttributes = exportOptions.includeAttributes ~= false
+    local includeProperties = exportOptions.includeProperties ~= false
+    local includeTags = exportOptions.includeTags ~= false
+    local includeEmptyProperties = exportOptions.includeEmptyProperties == true
+    local searchText = string.lower(tostring(exportOptions.searchText or ""))
 
     local roots = {}
 
@@ -1748,6 +1756,23 @@ local function buildJSONAsync(updateStatus, selectedOnly)
         return pathA < pathB
     end)
 
+    -- Optional instance search. A match is checked against name, class, and path.
+    -- This filters the export roots without changing the recursive hierarchy.
+    if searchText ~= "" then
+        local filteredRoots = {}
+        for _, instance in ipairs(roots) do
+            local name, className, path = "", "", ""
+            pcall(function() name = tostring(instance.Name) end)
+            pcall(function() className = tostring(instance.ClassName) end)
+            pcall(function() path = tostring(getPath(instance)) end)
+            local haystack = string.lower(name .. " " .. className .. " " .. path)
+            if string.find(haystack, searchText, 1, true) then
+                table.insert(filteredRoots, instance)
+            end
+        end
+        roots = filteredRoots
+    end
+
     local stats = {
         totalInstances = 0,
         totalAttributes = 0,
@@ -1768,6 +1793,9 @@ local function buildJSONAsync(updateStatus, selectedOnly)
         pcall(function()
             progressTotal += #selectedOnly:GetDescendants()
         end)
+    end
+    if searchText ~= "" then
+        progressTotal = math.max(1, #roots)
     end
 
     local function safePath(instance)
@@ -1887,6 +1915,7 @@ local function buildJSONAsync(updateStatus, selectedOnly)
         end
 
         -- Attributes
+        if includeAttributes then
         local attrOK, attrData = pcall(function()
             return getAttributes(instance)
         end)
@@ -1924,13 +1953,17 @@ local function buildJSONAsync(updateStatus, selectedOnly)
         elseif not attrOK then
             table.insert(record.errors, "GetAttributes failed: " .. tostring(attrData))
         end
+        end
 
         -- CollectionService tags
+        if includeTags then
         record.tags = collectTags(instance)
         record.tagsCount = #record.tags
         stats.totalTags += record.tagsCount
+        end
 
         -- Class-aware properties
+        if includeProperties then
         local propertiesOK, propertiesOrError = pcall(function()
             return collectRelevantProperties(instance)
         end)
@@ -1950,12 +1983,24 @@ local function buildJSONAsync(updateStatus, selectedOnly)
         else
             table.insert(record.errors, "Property collection failed: " .. tostring(propertiesOrError))
         end
+        end
+
+        if includeProperties and not includeEmptyProperties then
+            for propertyName, propertyRecord in pairs(record.properties) do
+                if propertyRecord == nil or (type(propertyRecord) == "table" and propertyRecord.value == nil and propertyRecord.error == nil) then
+                    record.properties[propertyName] = nil
+                end
+            end
+        end
 
         record.referencesCount = #record.references
         stats.totalReferences += record.referencesCount
 
         -- Recursive hierarchy
-        local childrenOK, childList = pcall(function()
+        local childrenOK
+        local childList
+        if includeChildren then
+        childrenOK, childList = pcall(function()
             return instance:GetChildren()
         end)
 
@@ -1985,6 +2030,7 @@ local function buildJSONAsync(updateStatus, selectedOnly)
             end
         elseif not childrenOK then
             table.insert(record.errors, "GetChildren failed: " .. tostring(childList))
+        end
         end
 
         -- Compute descendant count from the recursive records we actually exported.
@@ -2032,7 +2078,15 @@ local function buildJSONAsync(updateStatus, selectedOnly)
     local exportData = {
         metadata = {
             format = "RobloxClientInspector.CompleteExport",
-            version = 2,
+            version = 3,
+            options = {
+                includeChildren = includeChildren,
+                includeAttributes = includeAttributes,
+                includeProperties = includeProperties,
+                includeTags = includeTags,
+                includeEmptyProperties = includeEmptyProperties,
+                searchText = exportOptions.searchText or ""
+            },
             generatedAt = os.date("!%Y-%m-%dT%H:%M:%SZ"),
             selectedOnly = selectedOnly ~= nil and scanned[selectedOnly] == true,
             rootCount = #allRecords,
@@ -2083,7 +2137,7 @@ local function showJSON()
     jsonCancelRequested = false
     fullJSON = ""
     jsonRecordCount = 0
-    jsonGenerating = true
+    jsonGenerating = false
 
     -- Capture the current selection when the export starts.
     local exportSelection = selectedInstance
@@ -2119,8 +2173,21 @@ local function showJSON()
         Color3.fromRGB(25, 25, 25)
 
     jsonGui.BorderSizePixel = 0
-    jsonGui.ZIndex = 100
+    -- Render the JSON window above the Inspector without closing it.
+    -- The Inspector stays alive underneath so returning to it is instant.
+    jsonGui.ZIndex = 20000
     jsonGui.Parent = screenGui
+
+    -- Dim the Inspector behind the JSON window while keeping it open.
+    local jsonOverlay = Instance.new("Frame")
+    jsonOverlay.Name = "JSONOverlay"
+    jsonOverlay.Size = UDim2.fromScale(1, 1)
+    jsonOverlay.Position = UDim2.fromScale(0, 0)
+    jsonOverlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    jsonOverlay.BackgroundTransparency = 0.45
+    jsonOverlay.BorderSizePixel = 0
+    jsonOverlay.ZIndex = 19999
+    jsonOverlay.Parent = screenGui
 
     local corner = Instance.new("UICorner")
     corner.CornerRadius = UDim.new(0, 8)
@@ -2188,9 +2255,83 @@ local function showJSON()
         jsonCancelRequested = true
         jsonGenerating = false
 
+        if jsonOverlay and jsonOverlay.Parent then
+            jsonOverlay:Destroy()
+        end
+
         jsonGui:Destroy()
 
     end)
+
+    --====================================================
+    -- EXPORT OPTIONS
+    --====================================================
+
+    local optionsFrame = Instance.new("Frame")
+    optionsFrame.Name = "ExportOptions"
+    optionsFrame.Size = UDim2.new(1, -30, 0, 112)
+    optionsFrame.Position = UDim2.new(0, 15, 0, 48)
+    optionsFrame.BackgroundColor3 = Color3.fromRGB(32, 32, 32)
+    optionsFrame.BorderSizePixel = 0
+    optionsFrame.ZIndex = 101
+    optionsFrame.Parent = jsonGui
+
+    local optionsCorner = Instance.new("UICorner")
+    optionsCorner.CornerRadius = UDim.new(0, 8)
+    optionsCorner.Parent = optionsFrame
+
+    local searchInput = Instance.new("TextBox")
+    searchInput.Name = "InstanceSearch"
+    searchInput.Size = UDim2.new(1, -20, 0, 30)
+    searchInput.Position = UDim2.new(0, 10, 0, 8)
+    searchInput.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+    searchInput.BorderSizePixel = 0
+    searchInput.PlaceholderText = "Search instances..."
+    searchInput.Text = ""
+    searchInput.TextColor3 = Color3.new(1, 1, 1)
+    searchInput.PlaceholderColor3 = Color3.fromRGB(150, 150, 150)
+    searchInput.TextSize = 13
+    searchInput.Font = Enum.Font.SourceSans
+    searchInput.ClearTextOnFocus = false
+    searchInput.ZIndex = 102
+    searchInput.Parent = optionsFrame
+
+    local checks = {}
+    local function makeCheck(text, x, y, default)
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.fromOffset(155, 28)
+        b.Position = UDim2.fromOffset(x, y)
+        b.BackgroundTransparency = 1
+        b.TextXAlignment = Enum.TextXAlignment.Left
+        b.TextColor3 = Color3.new(1,1,1)
+        b.TextSize = 13
+        b.Font = Enum.Font.SourceSans
+        b.ZIndex = 102
+        b.Parent = optionsFrame
+        local state = default
+        local function refresh() b.Text = (state and "☑ " or "☐ ") .. text end
+        refresh()
+        b.Activated:Connect(function() state = not state; refresh() end)
+        checks[text] = function() return state end
+        return b
+    end
+
+    local checkButtons = {
+        makeCheck("Include children", 10, 45, true),
+        makeCheck("Include attributes", 170, 45, true),
+        makeCheck("Include properties", 330, 45, true),
+        makeCheck("Include tags", 490, 45, true),
+        makeCheck("Include empty properties", 10, 75, false)
+    }
+
+    if jsonWidth < 520 then
+        optionsFrame.Size = UDim2.new(1, -30, 0, 158)
+        checkButtons[1].Position = UDim2.fromOffset(10, 45)
+        checkButtons[2].Position = UDim2.fromOffset(160, 45)
+        checkButtons[3].Position = UDim2.fromOffset(10, 75)
+        checkButtons[4].Position = UDim2.fromOffset(160, 75)
+        checkButtons[5].Position = UDim2.fromOffset(10, 105)
+    end
 
     --====================================================
     -- STATUS
@@ -2203,7 +2344,7 @@ local function showJSON()
         UDim2.new(1, -30, 0, 25)
 
     statusLabel.Position =
-        UDim2.new(0, 15, 0, 50)
+        UDim2.new(0, 15, 0, (jsonWidth < 520 and 215 or 170))
 
     statusLabel.BackgroundTransparency = 1
     statusLabel.Text =
@@ -2234,7 +2375,7 @@ local function showJSON()
         UDim2.new(0.5, -20, 0, 25)
 
     recordLabel.Position =
-        UDim2.new(0, 15, 0, 78)
+        UDim2.new(0, 15, 0, (jsonWidth < 520 and 243 or 198))
 
     recordLabel.BackgroundTransparency = 1
     recordLabel.Text = "Records: 0"
@@ -2264,7 +2405,7 @@ local function showJSON()
         UDim2.new(0.5, -20, 0, 25)
 
     sizeLabel.Position =
-        UDim2.new(0.5, 0, 0, 78)
+        UDim2.new(0.5, 0, 0, (jsonWidth < 520 and 243 or 198))
 
     sizeLabel.BackgroundTransparency = 1
     sizeLabel.Text = "JSON Size: 0 KB"
@@ -2293,10 +2434,10 @@ local function showJSON()
     -- Leave a fixed bottom area for the action buttons so they remain
     -- visible even on small screens.
     previewBox.Size =
-        UDim2.new(1, -30, 1, -160)
+        UDim2.new(1, -30, 1, (jsonWidth < 520 and -325 or -280))
 
     previewBox.Position =
-        UDim2.new(0, 15, 0, 108)
+        UDim2.new(0, 15, 0, (jsonWidth < 520 and 273 or 228))
 
     previewBox.BackgroundColor3 =
         Color3.fromRGB(15, 15, 15)
@@ -2325,6 +2466,75 @@ local function showJSON()
 
     previewBox.ZIndex = 101
     previewBox.Parent = jsonGui
+
+    --====================================================
+    -- EXPORT JSON
+    --====================================================
+
+    local exportButton = Instance.new("TextButton")
+    exportButton.Size = UDim2.fromOffset(120, 35)
+    exportButton.Position = UDim2.new(1, -265, 1, -45)
+    exportButton.BackgroundColor3 = Color3.fromRGB(55, 140, 90)
+    exportButton.Text = "Export JSON"
+    exportButton.TextColor3 = Color3.new(1,1,1)
+    exportButton.TextSize = 14
+    exportButton.Font = Enum.Font.SourceSansBold
+    exportButton.ZIndex = 102
+    exportButton.Parent = jsonGui
+
+    local function startExport()
+        if jsonGenerating then return end
+        jsonCancelRequested = false
+        jsonGenerating = true
+        fullJSON = ""
+        jsonRecordCount = 0
+        previewBox.Text = "Generating JSON..."
+        exportButton.Text = "Generating..."
+        exportButton.Active = false
+
+        local exportOptions = {
+            includeChildren = checks["Include children"](),
+            includeAttributes = checks["Include attributes"](),
+            includeProperties = checks["Include properties"](),
+            includeTags = checks["Include tags"](),
+            includeEmptyProperties = checks["Include empty properties"](),
+            searchText = searchInput.Text
+        }
+
+        task.spawn(function()
+            local result, info = buildJSONAsync(function(processed,total,failed)
+                if not jsonGui.Parent then jsonCancelRequested = true; return end
+                recordLabel.Text = "Records: " .. tostring(processed) .. " / " .. tostring(total)
+                statusLabel.Text = "Generating... " .. tostring(processed) .. " / " .. tostring(total) .. (failed > 0 and (" | Errors: "..tostring(failed)) or "")
+            end, exportingSelected and exportSelection or nil, exportOptions)
+            jsonGenerating = false
+            exportButton.Active = true
+            exportButton.Text = "Export JSON"
+            if not result then
+                statusLabel.Text = tostring(info)
+                previewBox.Text = tostring(info)
+                return
+            end
+            fullJSON = result
+            jsonRecordCount = info.total or 0
+            local previewText = result
+            local decodeOK, decoded = pcall(function() return HttpService:JSONDecode(result) end)
+            if decodeOK and type(decoded) == "table" then
+                local previewData = {metadata=decoded.metadata, statistics=decoded.statistics, instances={}}
+                if type(decoded.instances) == "table" then
+                    for i=1,math.min(#decoded.instances,JSON_PREVIEW_RECORDS) do table.insert(previewData.instances,decoded.instances[i]) end
+                end
+                local previewOK, previewResult = pcall(function() return HttpService:JSONEncode(previewData) end)
+                if previewOK then previewText = previewResult end
+            end
+            previewBox.Text = previewText
+            sizeLabel.Text = string.format("JSON Size: %.2f KB", #fullJSON/1024)
+            recordLabel.Text = "Records: " .. tostring(jsonRecordCount)
+            statusLabel.Text = (exportingSelected and "Selected export ready — " or "Export ready — ") .. tostring(info.total or 0) .. " instances | " .. tostring(info.attributes or 0) .. " attrs | " .. tostring(info.properties or 0) .. " props | " .. tostring(info.tags or 0) .. " tags"
+        end)
+    end
+
+    exportButton.Activated:Connect(startExport)
 
     --====================================================
     -- COPY
@@ -2542,161 +2752,27 @@ local function showJSON()
 
     end)
 
-    --====================================================
-    -- START GENERATION
-    --====================================================
+    -- Compact footer for narrow/mobile JSON windows.
+    if jsonWidth < 520 then
+        copyButton.Size = UDim2.fromOffset(82, 32)
+        copyButton.Position = UDim2.new(0, 10, 1, -42)
+        copyButton.TextSize = 12
 
-    task.spawn(function()
+        discordButton.Size = UDim2.fromOffset(108, 32)
+        discordButton.Position = UDim2.new(0, 97, 1, -42)
+        discordButton.TextSize = 11
 
-        local result, info =
-            buildJSONAsync(function(
-                processed,
-                total,
-                failed
-            )
+        exportButton.Size = UDim2.fromOffset(90, 32)
+        exportButton.Position = UDim2.new(0, 210, 1, -42)
+        exportButton.TextSize = 12
 
-                if not jsonGui.Parent then
-                    jsonCancelRequested = true
-                    return
-                end
+        cancelButton.Size = UDim2.fromOffset(72, 32)
+        cancelButton.Position = UDim2.new(1, -82, 1, -42)
+        cancelButton.TextSize = 12
+    end
 
-                recordLabel.Text =
-                    "Records: " ..
-                    tostring(processed) ..
-                    " / " ..
-                    tostring(total)
+    -- Export starts from the Export JSON button above.
 
-                if failed > 0 then
-
-                    statusLabel.Text =
-                        "Generating... " ..
-                        tostring(processed) ..
-                        " / " ..
-                        tostring(total) ..
-                        " | Errors: " ..
-                        tostring(failed)
-
-                else
-
-                    statusLabel.Text =
-                        "Generating... " ..
-                        tostring(processed) ..
-                        " / " ..
-                        tostring(total)
-
-                end
-
-            end, exportingSelected and exportSelection or nil)
-
-        jsonGenerating = false
-
-        --================================================
-        -- FAILED / CANCELLED
-        --================================================
-
-        if not result then
-
-            if jsonGui.Parent then
-
-                statusLabel.Text =
-                    tostring(info)
-
-                previewBox.Text =
-                    tostring(info)
-
-            end
-
-            return
-        end
-
-        --================================================
-        -- STORE COMPLETE JSON
-        --================================================
-
-        fullJSON = result
-
-        jsonRecordCount =
-            info.total or 0
-
-        --================================================
-        -- PREVIEW COMPLETE EXPORT
-        --================================================
-
-        local previewText = result
-        local decodeOK, decoded =
-            pcall(function()
-                return HttpService:JSONDecode(result)
-            end)
-
-        if decodeOK and type(decoded) == "table" then
-            local previewData = {
-                metadata = decoded.metadata,
-                statistics = decoded.statistics,
-                instances = {}
-            }
-
-            if type(decoded.instances) == "table" then
-                for i = 1, math.min(#decoded.instances, JSON_PREVIEW_RECORDS) do
-                    table.insert(previewData.instances, decoded.instances[i])
-                end
-            end
-
-            local previewOK, previewResult =
-                pcall(function()
-                    return HttpService:JSONEncode(previewData)
-                end)
-
-            if previewOK then
-                previewText = previewResult
-            end
-        end
-
-        previewBox.Text = previewText
-
-        --================================================
-        -- FINAL SIZE
-        --================================================
-
-        local byteSize =
-            #fullJSON
-
-        local sizeKB =
-            byteSize / 1024
-
-        recordLabel.Text =
-            "Records: " ..
-            tostring(jsonRecordCount)
-
-        sizeLabel.Text =
-            string.format(
-                "JSON Size: %.2f KB",
-                sizeKB
-            )
-
-        if info.failed and info.failed > 0 then
-
-            statusLabel.Text =
-                (exportingSelected and "Selected complete export ready — " or "Complete export ready — ") ..
-                tostring(info.failed) ..
-                " record(s) had errors | " ..
-                tostring(info.attributes or 0) .. " attrs | " ..
-                tostring(info.properties or 0) .. " props | " ..
-                tostring(info.tags or 0) .. " tags | " ..
-                tostring(info.references or 0) .. " refs."
-
-        else
-
-            statusLabel.Text =
-                (exportingSelected and "Selected complete export ready — " or "Complete export ready — ") ..
-                tostring(info.total or 0) .. " instances | " ..
-                tostring(info.attributes or 0) .. " attrs | " ..
-                tostring(info.properties or 0) .. " props | " ..
-                tostring(info.tags or 0) .. " tags | " ..
-                tostring(info.references or 0) .. " refs."
-
-        end
-
-    end)
 end
 
 
