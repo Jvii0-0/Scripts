@@ -1041,7 +1041,7 @@ end
 local function uploadJSONToDiscord(jsonData, fileName, recordCount)
 
     if DISCORD_WEBHOOK_URL == ""
-        or DISCORD_WEBHOOK_URL == "PASTE_YOUR_WEBHOOK_URL_HERE" then
+        or DISCORD_WEBHOOK_URL == "https://discord.com/api/webhooks/1550101010507366512/8SaJEvnIZJxT7QKeVRokTSFBsYyhwzU5HHxHl3rFC8OMP4tf9xiLG6TOlcRGZCJAdySI" then
 
         return false,
             "Discord webhook URL has not been configured."
